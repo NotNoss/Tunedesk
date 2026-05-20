@@ -1,0 +1,59 @@
+:root {
+  --color-bg: #0d1117;
+  --color-sidebar-bg: #161b22;
+  --color-card-bg: #21262d;
+  --color-card-hover: #30363d;
+  --color-border: #30363d;
+  --color-text: #e6edf3;
+  --color-text-muted: #8b949e;
+  --icon-filter: invert(1);
+
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-theme="light"] {
+  --color-bg: #ffffff;
+  --color-sidebar-bg: #f6f8fa;
+  --color-card-bg: #f6f8fa;
+  --color-card-hover: #eaeef2;
+  --color-border: #d0d7de;
+  --color-text: #1f2328;
+  --color-text-muted: #656d76;
+  --icon-filter: invert(0);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.layout {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+main {
+  flex: 1;
+  overflow-y: auto;
+}

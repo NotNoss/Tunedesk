@@ -1,7 +1,9 @@
-# Tauri + React + Typescript
+# Tunedesk
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+## DISCLAIMER
+Tunedesk is an IPTV client only and does not provide any links or content itself.
 
-## Recommended IDE Setup
-
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Features:
+- Import your channels from M3U links or xtream
+- Cached data for faster response
+- Search channels across profiles

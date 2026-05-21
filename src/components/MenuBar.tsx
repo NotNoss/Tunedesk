@@ -66,6 +66,7 @@ export default function MenuBar({ onExit, onAbout, onNewProfile, onEditProfile, 
   return (
     <div
       ref={barRef}
+      data-tauri-drag-region
       style={{
         display: "flex",
         alignItems: "center",
@@ -118,21 +119,26 @@ export default function MenuBar({ onExit, onAbout, onNewProfile, onEditProfile, 
               }}
             >
               {menu.items.map((item) => (
-                <div
+                <button
                   key={item.label}
                   onClick={() => { item.action?.(); setOpenMenu(null); }}
                   style={{
+                    display: "block",
+                    width: "100%",
                     padding: "6px 12px",
                     fontSize: "13px",
                     color: "var(--color-text)",
+                    background: "transparent",
+                    border: "none",
                     borderRadius: "4px",
                     cursor: "pointer",
+                    textAlign: "left",
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background = "var(--color-card-hover)")}
                   onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                 >
                   {item.label}
-                </div>
+                </button>
               ))}
             </div>
           )}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import AboutModal from "./components/AboutModal";
 import ContentDetail from "./components/ContentDetail/ContentDetail";
 import EditProfileModal from "./components/EditProfileModal";
@@ -78,6 +79,7 @@ function App() {
     return (localStorage.getItem("theme") as "dark" | "light") ?? "dark";
   });
   const [logLevel, setLogLevel] = useState<"info" | "debug">("info");
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme === "light" ? "light" : "");
@@ -194,6 +196,9 @@ function App() {
     invoke<string>("get_log_level").then(level => {
       setLogLevel(level as "info" | "debug");
     }).catch(() => {});
+
+    const unlisten = listen<string>("update-ready", (e) => setUpdateVersion(e.payload));
+    return () => { unlisten.then(fn => fn()); };
   }, []);
 
   async function handleLogLevelChange(level: "info" | "debug") {
@@ -217,6 +222,13 @@ function App() {
         onEditProfile={() => setShowEditProfile(true)}
         onPreferences={() => setShowPreferences(true)}
       />
+      {updateVersion && (
+        <div className="update-banner">
+          <span>Version {updateVersion} is ready to install.</span>
+          <button onClick={() => invoke("restart_to_update")}>Restart now</button>
+          <button className="update-banner-dismiss" onClick={() => setUpdateVersion(null)}>✕</button>
+        </div>
+      )}
       <div className="layout">
         <Sidebar profiles={profiles} m3u8Profiles={m3u8Profiles} profileIcons={profileIcons} onCategorySelect={handleCategorySelect} />
         <main style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>

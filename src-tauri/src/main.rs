@@ -9,6 +9,7 @@ mod playback;
 mod profiles;
 mod search;
 mod series;
+mod update;
 mod vods;
 
 use tauri::Manager;
@@ -25,6 +26,7 @@ fn exit_app() {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cache::AppCacheState::default())
         .manage(logs::AppLogState::default())
         .setup(|app| {
@@ -37,6 +39,12 @@ fn main() {
             *handle.state::<cache::AppCacheState>().0.lock().unwrap() = cache_data;
 
             logs::log_info(&handle, "app", "Application started");
+
+            let update_handle = handle.clone();
+            tauri::async_runtime::spawn(async move {
+                update::check_for_updates(update_handle).await;
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,6 +80,7 @@ fn main() {
             logs::clear_logs,
             logs::get_log_level,
             logs::set_log_level,
+            update::restart_to_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -78,9 +78,16 @@ end)"#,
     }
 
     let script_arg = format!("--script={}", script_path.to_string_lossy());
-    let mut args = vec![url, script_arg];
+    let mut args = vec![url, script_arg, "--fs".to_string()];
     if start_pos > 0.0 {
         args.push(format!("--start={:.1}", start_pos));
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let config_dir = resource_dir.join("mpv-config");
+        log_debug(app, "playback", format!("mpv config dir: {} (exists: {})", config_dir.display(), config_dir.exists()));
+        if config_dir.exists() {
+            args.push(format!("--config-dir={}", config_dir.to_string_lossy()));
+        }
     }
 
     let mpv = mpv_executable();

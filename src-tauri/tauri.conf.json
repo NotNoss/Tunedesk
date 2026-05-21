@@ -26,11 +26,11 @@
   },
   "productName": "tunedesk",
   "mainBinaryName": "tunedesk",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "identifier": "com.noss.tunedesk",
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVERDU0Qjc2N0ZEREI5NDAKUldSQXVkMS9ka3ZWWGRZMGlOc0dyQi9Db2MyRnBQSU9CdVhTejF2NktnTndDVDdTbmtQakkvT0cK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDQkVDRkQ4OTI0RjlCNDIKUldSQ20wK1MyTSsrWExINEFqVGtFUU5sRDlLY3VET3phMURmZXZzRERSQzNmN0tOVDVrOHB4dkgK",
       "endpoints": [
         "https://github.com/NotNoss/Tunedesk/releases/latest/download/latest.json"
       ]

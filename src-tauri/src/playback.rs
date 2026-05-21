@@ -73,10 +73,33 @@ end)"#,
     log_info(app, "playback", format!("Launching mpv for '{key}' (profile: {profile}, start: {start_pos:.1}s)"));
     log_debug(app, "playback", format!("mpv url: {url}"));
 
-    if let Some(w) = app.get_webview_window("main") {
+    let window = app.get_webview_window("main");
+    if let Some(w) = &window {
         let _ = w.hide();
     }
 
+    let result = run_mpv(app, &key, url, start_pos, &script_path).await;
+
+    if let Some(w) = &window {
+        let _ = w.show();
+    }
+
+    let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(&pos_path);
+
+    result?;
+
+    if let Ok(json) = std::fs::read_to_string(&pos_path) {
+        if let Ok(entry) = serde_json::from_str::<ProgressEntry>(&json) {
+            log_debug(app, "playback", format!("Saving progress for '{key}': {:.1}s / {:.1}s", entry.position, entry.duration));
+            write_progress_entry(app, profile, &key, entry.position, entry.duration);
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_mpv(app: &tauri::AppHandle, key: &str, url: String, start_pos: f64, script_path: &std::path::Path) -> Result<(), String> {
     let script_arg = format!("--script={}", script_path.to_string_lossy());
     let mut args = vec![url, script_arg, "--fs".to_string()];
     if start_pos > 0.0 {
@@ -111,20 +134,5 @@ end)"#,
         })?;
 
     log_info(app, "playback", format!("mpv exited for '{key}'"));
-
-    if let Ok(json) = std::fs::read_to_string(&pos_path) {
-        if let Ok(entry) = serde_json::from_str::<ProgressEntry>(&json) {
-            log_debug(app, "playback", format!("Saving progress for '{key}': {:.1}s / {:.1}s", entry.position, entry.duration));
-            write_progress_entry(app, profile, &key, entry.position, entry.duration);
-        }
-    }
-
-    let _ = std::fs::remove_file(&script_path);
-    let _ = std::fs::remove_file(&pos_path);
-
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-    }
-
     Ok(())
 }

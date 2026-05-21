@@ -17,10 +17,13 @@ I was having a hard time finding a desktop client for IPTV that I liked so I mad
 ## Install
 
 ### Windows
-Download the exe from the [releases](https://github.com/NotNoss/Tunedesk/releases/tag/1.0.0). The exe is not signed because when I was looking it up, it seemed like a lot to get it signed. Maybe one day, feel free to open an issue if you need help getting it installed.
+Download the exe from the [releases](https://github.com/NotNoss/Tunedesk/releases/latest). The exe is not signed because when I was looking it up, it seemed like a lot to get it signed. Maybe one day, feel free to open an issue if you need help getting it installed.
+
+### AppImage
+You can download the [appimage](https://github.com/NotNoss/Tunedesk/releases/latest) and run it if you would like the benefits of auto update on Linux.
 
 ### Ubuntu/Debian
-Download the tunedesk.deb from the [releases](https://github.com/NotNoss/Tunedesk/releases/tag/1.0.0)
+Download the tunedesk.deb from the [releases](https://github.com/NotNoss/Tunedesk/releases/latest)
 ```
 sudo dpkg -i ./tunedesk.deb
 ```

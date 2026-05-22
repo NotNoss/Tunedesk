@@ -79,7 +79,6 @@ function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => {
     return (localStorage.getItem("theme") as "dark" | "light") ?? "dark";
   });
-  const [logLevel, setLogLevel] = useState<"info" | "debug">("info");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -194,18 +193,9 @@ function App() {
 
   useEffect(() => {
     loadProfiles();
-    invoke<string>("get_log_level").then(level => {
-      setLogLevel(level as "info" | "debug");
-    }).catch(() => {});
-
     const unlisten = listen<string>("update-ready", (e) => setUpdateVersion(e.payload));
     return () => { unlisten.then(fn => fn()); };
   }, []);
-
-  async function handleLogLevelChange(level: "info" | "debug") {
-    setLogLevel(level);
-    await invoke("set_log_level", { level }).catch(() => {});
-  }
 
   function handleExit() {
     invoke("exit_app");
@@ -368,8 +358,7 @@ function App() {
         <PreferencesModal
           theme={theme}
           onThemeChange={setTheme}
-          logLevel={logLevel}
-          onLogLevelChange={handleLogLevelChange}
+
           onClose={() => setShowPreferences(false)}
         />
       )}

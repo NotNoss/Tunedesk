@@ -1,5 +1,9 @@
+use std::io::Write;
 use std::sync::Mutex;
 use tauri::Manager;
+
+const LOG_MAX_AGE_SECS: u64 = 7 * 24 * 3600;
+const LOG_MAX_SIZE_BYTES: u64 = 1024 * 1024; // 1 MB
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,33 +30,29 @@ impl LogLevel {
     }
 }
 
-#[derive(serde::Serialize, Clone)]
-pub struct LogEntry {
-    pub timestamp: i64,
-    pub level: String,
-    pub module: String,
-    pub message: String,
-}
-
 pub struct AppLogState {
     pub level: Mutex<LogLevel>,
-    pub entries: Mutex<Vec<LogEntry>>,
 }
 
 impl Default for AppLogState {
     fn default() -> Self {
         AppLogState {
             level: Mutex::new(LogLevel::Info),
-            entries: Mutex::new(Vec::new()),
         }
     }
 }
 
-// ─── Persistence ──────────────────────────────────────────────────────────────
+// ─── Paths ────────────────────────────────────────────────────────────────────
+
+fn log_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("tunedesk.log"))
+}
 
 fn level_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("log_level.txt"))
 }
+
+// ─── Persistence ──────────────────────────────────────────────────────────────
 
 pub fn load_log_level(app: &tauri::AppHandle) -> LogLevel {
     let Some(path) = level_path(app) else { return LogLevel::Info; };
@@ -71,6 +71,32 @@ fn save_log_level(app: &tauri::AppHandle, level: &LogLevel) {
     }
 }
 
+// ─── File rotation ────────────────────────────────────────────────────────────
+
+pub fn rotate_log_if_needed(app: &tauri::AppHandle) {
+    let Some(path) = log_path(app) else { return; };
+
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+
+    if !path.exists() {
+        return;
+    }
+
+    let Ok(meta) = std::fs::metadata(&path) else { return; };
+
+    let too_old = meta
+        .modified()
+        .ok()
+        .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
+        .map_or(false, |age| age.as_secs() > LOG_MAX_AGE_SECS);
+
+    if too_old || meta.len() > LOG_MAX_SIZE_BYTES {
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 // ─── Logging functions ────────────────────────────────────────────────────────
 
 fn now_ts() -> i64 {
@@ -80,25 +106,52 @@ fn now_ts() -> i64 {
         .as_secs() as i64
 }
 
+fn format_ts(ts: i64) -> String {
+    let s = ts as u64;
+    let sec = s % 60;
+    let min = (s / 60) % 60;
+    let hour = (s / 3600) % 24;
+    let mut days = s / 86400;
+
+    let mut year = 1970u32;
+    loop {
+        let dy = if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 366u64 } else { 365 };
+        if days < dy { break; }
+        days -= dy;
+        year += 1;
+    }
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1u32;
+    for &dim in &month_days {
+        if days < dim { break; }
+        days -= dim;
+        month += 1;
+    }
+
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, days + 1, hour, min, sec)
+}
+
 pub fn log(app: &tauri::AppHandle, level: LogLevel, module: &str, message: String) {
-    let state = app.state::<AppLogState>();
     {
+        let state = app.state::<AppLogState>();
         let current = state.level.lock().unwrap();
         if level == LogLevel::Debug && *current != LogLevel::Debug {
             return;
         }
     }
-    let entry = LogEntry {
-        timestamp: now_ts(),
-        level: level.as_str().to_string(),
-        module: module.to_string(),
-        message,
-    };
-    let mut entries = state.entries.lock().unwrap();
-    entries.push(entry);
-    // Cap at 2000 entries; trim oldest 500 when exceeded
-    if entries.len() > 2000 {
-        entries.drain(0..500);
+
+    let Some(path) = log_path(app) else { return; };
+    let line = format!(
+        "{} [{:<5}] [{}] {}\n",
+        format_ts(now_ts()),
+        level.as_str().to_uppercase(),
+        module,
+        message
+    );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = file.write_all(line.as_bytes());
     }
 }
 
@@ -111,16 +164,6 @@ pub fn log_debug(app: &tauri::AppHandle, module: &str, message: impl Into<String
 }
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn get_logs(app: tauri::AppHandle) -> Vec<LogEntry> {
-    app.state::<AppLogState>().entries.lock().unwrap().clone()
-}
-
-#[tauri::command]
-pub fn clear_logs(app: tauri::AppHandle) {
-    app.state::<AppLogState>().entries.lock().unwrap().clear();
-}
 
 #[tauri::command]
 pub fn get_log_level(app: tauri::AppHandle) -> String {

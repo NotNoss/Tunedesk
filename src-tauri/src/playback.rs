@@ -116,8 +116,21 @@ async fn run_mpv(app: &tauri::AppHandle, key: &str, url: String, start_pos: f64,
     let mpv = mpv_executable();
     log_debug(app, "playback", format!("mpv binary: {}", mpv.display()));
 
-    let mut child = std::process::Command::new(&mpv)
-        .args(&args)
+    let mut cmd = std::process::Command::new(&mpv);
+    cmd.args(&args);
+
+    // Inside an AppImage, LD_LIBRARY_PATH is set to bundled libs that conflict
+    // with system mpv. Restore the pre-AppImage path so mpv resolves its own libs.
+    if std::env::var_os("APPIMAGE").is_some() {
+        let orig = std::env::var("LD_LIBRARY_PATH_ORIG").unwrap_or_default();
+        if orig.is_empty() {
+            cmd.env_remove("LD_LIBRARY_PATH");
+        } else {
+            cmd.env("LD_LIBRARY_PATH", orig);
+        }
+    }
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| {
             let msg = format!("Failed to launch mpv ({}): {e}", mpv.display());

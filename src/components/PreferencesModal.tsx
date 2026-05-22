@@ -1,46 +1,15 @@
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import Select from "./Select";
 import ClearCacheModal from "./ClearCacheModal";
 
 interface PreferencesModalProps {
   theme: "dark" | "light";
   onThemeChange: (theme: "dark" | "light") => void;
-  logLevel: "info" | "debug";
-  onLogLevelChange: (level: "info" | "debug") => void;
   onClose: () => void;
 }
 
-const LOG_LEVEL_OPTIONS = [
-  { value: "info", label: "Info" },
-  { value: "debug", label: "Debug" },
-];
-
-export default function PreferencesModal({ theme, onThemeChange, logLevel, onLogLevelChange, onClose }: PreferencesModalProps) {
+export default function PreferencesModal({ theme, onThemeChange, onClose }: PreferencesModalProps) {
   const isDark = theme === "dark";
   const [showClearCache, setShowClearCache] = useState(false);
-
-  async function handleCopyLogs() {
-    try {
-      const entries = await invoke<{ timestamp: number; level: string; module: string; message: string }[]>("get_logs");
-      if (entries.length === 0) {
-        await navigator.clipboard.writeText("No logs recorded.");
-        return;
-      }
-      const text = entries.map(e => {
-        const d = new Date(e.timestamp * 1000);
-        const ts = d.toISOString().replace("T", " ").substring(0, 19);
-        return `${ts} [${e.level.toUpperCase().padEnd(5)}] [${e.module}] ${e.message}`;
-      }).join("\n");
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // clipboard write failed silently
-    }
-  }
-
-  async function handleClearLogs() {
-    await invoke("clear_logs").catch(() => {});
-  }
 
   return (
     <>
@@ -107,55 +76,6 @@ export default function PreferencesModal({ theme, onThemeChange, logLevel, onLog
               />
             </button>
             <span style={{ color: "var(--color-text-muted)", fontSize: "12px" }}>Dark</span>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "24px" }}>
-          <span style={{ color: "var(--color-text)", fontSize: "13px" }}>Log level</span>
-          <div style={{ minWidth: "120px" }}>
-            <Select
-              value={logLevel}
-              onChange={v => onLogLevelChange(v as "info" | "debug")}
-              options={LOG_LEVEL_OPTIONS}
-            />
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "24px" }}>
-          <span style={{ color: "var(--color-text)", fontSize: "13px" }}>Logs</span>
-          <div style={{ display: "flex", gap: "8px" }}>
-            <button
-              onClick={handleCopyLogs}
-              style={{
-                background: "var(--color-card-hover)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text)",
-                fontSize: "12px",
-                padding: "5px 14px",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = "var(--color-sidebar-bg)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "var(--color-card-hover)")}
-            >
-              Copy to clipboard
-            </button>
-            <button
-              onClick={handleClearLogs}
-              style={{
-                background: "var(--color-card-hover)",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-text-muted)",
-                fontSize: "12px",
-                padding: "5px 14px",
-                borderRadius: "6px",
-                cursor: "pointer",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.background = "var(--color-sidebar-bg)")}
-              onMouseLeave={e => (e.currentTarget.style.background = "var(--color-card-hover)")}
-            >
-              Clear
-            </button>
           </div>
         </div>
 

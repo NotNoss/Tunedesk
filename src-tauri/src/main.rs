@@ -35,6 +35,8 @@ fn main() {
             let level = logs::load_log_level(&handle);
             *handle.state::<logs::AppLogState>().level.lock().unwrap() = level;
 
+            logs::rotate_log_if_needed(&handle);
+
             let cache_data = cache::load_cache_from_disk(&handle);
             *handle.state::<cache::AppCacheState>().0.lock().unwrap() = cache_data;
 
@@ -77,8 +79,6 @@ fn main() {
             cache::prime_cache,
             cache::clear_cache,
             search::search_all_profiles,
-            logs::get_logs,
-            logs::clear_logs,
             logs::get_log_level,
             logs::set_log_level,
             update::restart_to_update,

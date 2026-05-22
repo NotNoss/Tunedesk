@@ -1,13 +1,21 @@
 import { useState } from "react";
+import Select from "./Select";
 import ClearCacheModal from "./ClearCacheModal";
 
 interface PreferencesModalProps {
   theme: "dark" | "light";
   onThemeChange: (theme: "dark" | "light") => void;
+  logLevel: "info" | "debug";
+  onLogLevelChange: (level: "info" | "debug") => void;
   onClose: () => void;
 }
 
-export default function PreferencesModal({ theme, onThemeChange, onClose }: PreferencesModalProps) {
+const LOG_LEVEL_OPTIONS = [
+  { value: "info", label: "Info" },
+  { value: "debug", label: "Debug" },
+];
+
+export default function PreferencesModal({ theme, onThemeChange, logLevel, onLogLevelChange, onClose }: PreferencesModalProps) {
   const isDark = theme === "dark";
   const [showClearCache, setShowClearCache] = useState(false);
 
@@ -76,6 +84,17 @@ export default function PreferencesModal({ theme, onThemeChange, onClose }: Pref
               />
             </button>
             <span style={{ color: "var(--color-text-muted)", fontSize: "12px" }}>Dark</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "24px" }}>
+          <span style={{ color: "var(--color-text)", fontSize: "13px" }}>Log level</span>
+          <div style={{ minWidth: "120px" }}>
+            <Select
+              value={logLevel}
+              onChange={v => onLogLevelChange(v as "info" | "debug")}
+              options={LOG_LEVEL_OPTIONS}
+            />
           </div>
         </div>
 

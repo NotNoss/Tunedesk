@@ -191,11 +191,21 @@ function App() {
     }
   }
 
+  const [logLevel, setLogLevel] = useState<"info" | "debug">("info");
+
   useEffect(() => {
     loadProfiles();
+    invoke<string>("get_log_level").then(level => {
+      setLogLevel(level as "info" | "debug");
+    }).catch(() => {});
     const unlisten = listen<string>("update-ready", (e) => setUpdateVersion(e.payload));
     return () => { unlisten.then(fn => fn()); };
   }, []);
+
+  async function handleLogLevelChange(level: "info" | "debug") {
+    setLogLevel(level);
+    await invoke("set_log_level", { level }).catch(() => {});
+  }
 
   function handleExit() {
     invoke("exit_app");
@@ -357,6 +367,8 @@ function App() {
       {showPreferences && (
         <PreferencesModal
           theme={theme}
+          logLevel={logLevel}
+          onLogLevelChange={handleLogLevelChange}
           onThemeChange={setTheme}
 
           onClose={() => setShowPreferences(false)}

@@ -30,7 +30,7 @@
   "identifier": "com.noss.tunedesk",
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDQkVDRkQ4OTI0RjlCNDIKUldSQ20wK1MyTSsrWExINEFqVGtFUU5sRDlLY3VET3phMURmZXZzRERSQzNmN0tOVDVrOHB4dkgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ4NDY0NzEyQjEzNDI4RkMKUldUOEtEU3hFa2RHMkVpTHlHNy9uV3ZZck51YXZ2R0QrRm9qa3J3V21TYlpXS3hERmN6YzBiTWgK",
       "endpoints": [
         "https://github.com/NotNoss/Tunedesk/releases/latest/download/latest.json"
       ]

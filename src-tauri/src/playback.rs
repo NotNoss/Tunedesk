@@ -7,7 +7,7 @@ use crate::logs::{log_debug, log_info};
 // Locate the mpv binary. When Tauri bundles a sidecar it places the binary
 // next to the app executable, so we check there first and fall back to the
 // system PATH so development / non-bundled installs still work.
-fn mpv_executable() -> PathBuf {
+pub fn mpv_executable() -> PathBuf {
     let binary_name = if cfg!(target_os = "windows") { "mpv.exe" } else { "mpv" };
 
     if let Ok(exe) = std::env::current_exe() {

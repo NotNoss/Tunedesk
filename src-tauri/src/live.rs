@@ -190,16 +190,38 @@ pub async fn play_live(app: tauri::AppHandle, name: String, stream_id: u64) -> R
 
     log_debug(&app, "live", format!("Live stream URL resolved for stream {stream_id}"));
 
-    if let Some(w) = app.get_webview_window("main") {
+    let window = app.get_webview_window("main");
+    if let Some(w) = &window {
         let _ = w.hide();
     }
 
-    let mut child = std::process::Command::new("mpv")
-        .arg(&url)
+    let result = run_live_mpv(&app, url).await;
+
+    if let Some(w) = &window {
+        let _ = w.show();
+    }
+
+    result?;
+    log_info(&app, "live", format!("Live stream {stream_id} playback ended"));
+    Ok(())
+}
+
+async fn run_live_mpv(app: &tauri::AppHandle, url: String) -> Result<(), String> {
+    let mut args = vec![url, "--fs".to_string()];
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let config_dir = resource_dir.join("mpv-config");
+        if config_dir.exists() {
+            args.push(format!("--config-dir={}", config_dir.to_string_lossy()));
+        }
+    }
+
+    let mpv = crate::playback::mpv_executable();
+    let mut child = std::process::Command::new(&mpv)
+        .args(&args)
         .spawn()
         .map_err(|e| {
-            let msg = format!("Failed to launch mpv: {e}");
-            log_info(&app, "live", &msg);
+            let msg = format!("Failed to launch mpv ({}): {e}", mpv.display());
+            log_info(app, "live", &msg);
             msg
         })?;
 
@@ -207,15 +229,9 @@ pub async fn play_live(app: tauri::AppHandle, name: String, stream_id: u64) -> R
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| {
-            log_info(&app, "live", format!("mpv exited with error: {e}"));
+            log_info(app, "live", format!("mpv exited with error: {e}"));
             e.to_string()
         })?;
-
-    log_info(&app, "live", format!("Live stream {stream_id} playback ended"));
-
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-    }
 
     Ok(())
 }

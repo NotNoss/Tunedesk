@@ -1,9 +1,10 @@
-use tauri::Manager;
+use std::collections::HashMap;
+use tauri::{Emitter, Manager};
 
 use crate::logs::{log_debug, log_info};
 use crate::profiles::{read_credentials, ProfileCredentials};
 use crate::cache::{
-    api_get, flush_to_disk, is_fresh, needs_fetch, now_ts, save_cache_to_disk,
+    api_get, is_fresh, needs_fetch, now_ts, save_cache_to_disk,
     AppCacheState, VodCategory, CATEGORY_TTL, EPG_TTL, STREAM_TTL,
 };
 
@@ -13,12 +14,33 @@ use crate::cache::{
 pub struct LiveStream {
     #[serde(default)]
     pub num: u32,
+    #[serde(default)]
     pub name: String,
     pub stream_id: u64,
     #[serde(default)]
     pub stream_icon: String,
     #[serde(default)]
     pub epg_channel_id: String,
+}
+
+// Xtream providers vary: stream_id can be an integer, a float, or a quoted string.
+// Parse a single raw JSON object into a LiveStream, returning None on invalid data.
+fn parse_live_stream(v: &serde_json::Value) -> Option<LiveStream> {
+    let raw_id = v.get("stream_id")?;
+    let stream_id = raw_id
+        .as_u64()
+        .or_else(|| raw_id.as_f64().map(|f| f as u64))
+        .or_else(|| raw_id.as_str().and_then(|s| s.trim().parse().ok()))
+        .filter(|&id| id > 0)?;
+
+    let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let num = v.get("num")
+        .and_then(|n| n.as_u64().or_else(|| n.as_str().and_then(|s| s.parse().ok())))
+        .unwrap_or(0) as u32;
+    let stream_icon = v.get("stream_icon").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let epg_channel_id = v.get("epg_channel_id").and_then(|n| n.as_str()).unwrap_or("").to_string();
+
+    Some(LiveStream { num, name, stream_id, stream_icon, epg_channel_id })
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
@@ -90,30 +112,89 @@ pub async fn get_live_streams(app: tauri::AppHandle, name: String, category_id: 
         }
     }
 
-    log_debug(&app, "live", format!("Fetching live streams for '{name}' cat {category_id}"));
     let creds = read_credentials(&app)?;
     let p = creds.get(&name).ok_or_else(|| {
         let msg = format!("Profile '{name}' not found");
         log_info(&app, "live", &msg);
         msg
     })?.clone();
-    let url = format!("{}/player_api.php?username={}&password={}&action=get_live_streams&category_id={}", p.url, p.username, p.password, category_id);
-    let data: Vec<LiveStream> = api_get(&url).await.map_err(|e| {
-        log_info(&app, "live", format!("Failed to fetch live streams for '{name}' cat {category_id}: {e}"));
-        e
-    })?;
 
-    log_debug(&app, "live", format!("Fetched {} live streams for '{name}' cat {category_id}", data.len()));
+    fetch_all_live_and_cache(&app, &name, &p).await?;
+
+    let state = app.state::<AppCacheState>();
+    let cache = state.0.lock().unwrap();
+    Ok(cache
+        .get(&name)
+        .and_then(|pc| pc.live_streams.get(&category_id))
+        .cloned()
+        .unwrap_or_default())
+}
+
+// Fetch XMLTV EPG for an Xtream profile (one HTTP request) and cache by epg_channel_id.
+async fn fetch_xtream_xmltv(app: &tauri::AppHandle, name: &str, p: &ProfileCredentials) -> Result<(), String> {
+    let event_id = format!("epg:{name}");
+    let _ = app.emit("fetch:start", serde_json::json!({ "id": event_id, "message": format!("Pulling EPG from {name}") }));
+    let url = format!("{}/xmltv.php?username={}&password={}", p.url, p.username, p.password);
+    log_info(app, "live", format!("Fetching XMLTV EPG for '{name}'"));
+    let result = reqwest::get(&url).await
+        .map_err(|e| e.to_string())
+        .and_then(|r| {
+            if r.status().is_success() { Ok(r) }
+            else { Err(format!("XMLTV returned HTTP {}", r.status())) }
+        });
+    let bytes = match result {
+        Err(e) => {
+            log_info(app, "live", format!("XMLTV fetch failed for '{name}': {e}"));
+            let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
+            return Err(e);
+        }
+        Ok(r) => r.bytes().await.map_err(|e| {
+            let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
+            e.to_string()
+        })?,
+    };
+
+    let epg = crate::m3u8::parse_epg_xml(&bytes);
+    log_info(app, "live", format!("Parsed XMLTV EPG for '{name}': {} channels", epg.len()));
 
     {
         let state = app.state::<AppCacheState>();
         let mut cache = state.0.lock().unwrap();
-        let pc = cache.entry(name).or_default();
-        pc.live_streams.insert(category_id.clone(), data.clone());
-        pc.streams_at.insert(skey, now_ts());
-        save_cache_to_disk(&app, &cache);
+        let pc = cache.entry(name.to_string()).or_default();
+        pc.xtream_epg = epg;
+        pc.xtream_epg_at = now_ts();
     }
-    Ok(data)
+    let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
+    Ok(())
+}
+
+// Fetch all EPG data once and return it keyed by epg_channel_id.
+// The frontend maps each channel's epg_channel_id to its listings.
+#[tauri::command]
+pub async fn get_all_epg(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<HashMap<String, Vec<serde_json::Value>>, String> {
+    if crate::profiles::is_m3u8_profile(&app, &name) {
+        let state = app.state::<AppCacheState>();
+        let cache = state.0.lock().unwrap();
+        return Ok(cache.get(&name).map(|pc| pc.m3u8_epg.clone()).unwrap_or_default());
+    }
+
+    let epg_fresh = {
+        let state = app.state::<AppCacheState>();
+        let cache = state.0.lock().unwrap();
+        cache.get(&name).map_or(false, |pc| is_fresh(pc.xtream_epg_at, EPG_TTL))
+    };
+    if !epg_fresh {
+        let creds = read_credentials(&app)?;
+        let p = creds.get(&name).ok_or_else(|| format!("Profile '{name}' not found"))?.clone();
+        let _ = fetch_xtream_xmltv(&app, &name, &p).await;
+    }
+
+    let state = app.state::<AppCacheState>();
+    let cache = state.0.lock().unwrap();
+    Ok(cache.get(&name).map(|pc| pc.xtream_epg.clone()).unwrap_or_default())
 }
 
 #[tauri::command]
@@ -238,23 +319,70 @@ async fn run_live_mpv(app: &tauri::AppHandle, url: String) -> Result<(), String>
 
 // ─── Cache priming helper ─────────────────────────────────────────────────────
 
-pub async fn fetch_uncached_streams(app: &tauri::AppHandle, name: &str, p: &ProfileCredentials, cats: &[VodCategory]) {
-    let mut dirty = false;
-    for cat in cats {
-        let skey = format!("live:{}", cat.category_id);
-        if !needs_fetch(app, name, &skey) { continue; }
-        log_debug(app, "live", format!("Priming live streams for '{name}' cat {}", cat.category_id));
-        let url = format!("{}/player_api.php?username={}&password={}&action=get_live_streams&category_id={}", p.url, p.username, p.password, cat.category_id);
-        let Ok(items) = api_get::<Vec<LiveStream>>(&url).await else {
-            log_info(app, "live", format!("Failed to prime live streams for '{name}' cat {}", cat.category_id));
-            continue;
-        };
+// Fetch every live stream from the provider in a single request, group by category_id,
+// and cache all categories at once. This avoids per-category server-side filtering bugs
+// where some providers omit channels from category-specific responses.
+async fn fetch_all_live_and_cache(app: &tauri::AppHandle, name: &str, p: &ProfileCredentials) -> Result<(), String> {
+    log_info(app, "live", format!("Fetching all live streams for '{name}'"));
+    let event_id = format!("live:{name}");
+    let _ = app.emit("fetch:start", serde_json::json!({ "id": event_id, "message": format!("Pulling live channels from {name}") }));
+    let url = format!(
+        "{}/player_api.php?username={}&password={}&action=get_live_streams",
+        p.url, p.username, p.password
+    );
+    let raw: Vec<serde_json::Value> = api_get(&url).await.map_err(|e| {
+        log_info(app, "live", format!("Failed to fetch live streams for '{name}': {e}"));
+        let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
+        e
+    })?;
+
+    let mut grouped: HashMap<String, Vec<LiveStream>> = HashMap::new();
+    let mut skipped = 0usize;
+    for v in &raw {
+        let cat_id = v.get("category_id")
+            .and_then(|c| {
+                c.as_str().map(|s| s.to_string())
+                    .or_else(|| c.as_u64().map(|n| n.to_string()))
+            })
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "0".to_string());
+        match parse_live_stream(v) {
+            Some(stream) => grouped.entry(cat_id).or_default().push(stream),
+            None => skipped += 1,
+        }
+    }
+
+    let total: usize = grouped.values().map(|v| v.len()).sum();
+    log_info(app, "live", format!(
+        "Parsed {total} live streams for '{name}' ({} raw, {skipped} skipped, {} categories)",
+        raw.len(), grouped.len()
+    ));
+
+    let ts = now_ts();
+    {
         let state = app.state::<AppCacheState>();
         let mut cache = state.0.lock().unwrap();
         let pc = cache.entry(name.to_string()).or_default();
-        pc.streams_at.insert(skey, now_ts());
-        pc.live_streams.insert(cat.category_id.clone(), items);
-        dirty = true;
+        for (cat_id, streams) in grouped {
+            pc.streams_at.insert(format!("live:{cat_id}"), ts);
+            pc.live_streams.insert(cat_id, streams);
+        }
+        save_cache_to_disk(app, &cache);
     }
-    if dirty { flush_to_disk(app); }
+    let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
+    Ok(())
+}
+
+pub async fn fetch_uncached_streams(app: &tauri::AppHandle, name: &str, p: &ProfileCredentials, cats: &[VodCategory]) {
+    let any_stale = cats.iter().any(|cat| {
+        let skey = format!("live:{}", cat.category_id);
+        needs_fetch(app, name, &skey)
+    });
+    if !any_stale {
+        log_debug(app, "live", format!("All live stream categories fresh for '{name}', skipping prime"));
+        return;
+    }
+    if let Err(e) = fetch_all_live_and_cache(app, name, p).await {
+        log_info(app, "live", format!("Failed to prime live streams for '{name}': {e}"));
+    }
 }

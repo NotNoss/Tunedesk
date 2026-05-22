@@ -62,6 +62,7 @@ fn main() {
             live::get_live_categories,
             live::get_live_streams,
             live::get_channel_epg,
+            live::get_all_epg,
             live::play_live,
             vods::get_vod_categories,
             vods::get_vod_streams,

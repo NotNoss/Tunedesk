@@ -3,6 +3,7 @@ export interface LiveStream {
   name: string;
   stream_id: number;
   stream_icon: string;
+  epg_channel_id: string;
 }
 
 export interface EpgListing {

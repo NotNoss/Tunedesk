@@ -18,35 +18,37 @@ export default function LiveGrid({ profileName, categoryId, onBack }: LiveGridPr
   const [selected, setSelected] = useState<LiveStream | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     invoke<LiveStream[]>("get_live_streams", { name: profileName, categoryId })
       .then(chs => {
+        if (cancelled) return;
         setChannels(chs);
         setLoading(false);
         if (chs.length > 0) setSelected(chs[0]);
 
-        const BATCH_SIZE = 20;
-        for (let i = 0; i < chs.length; i += BATCH_SIZE) {
-          const batch = chs.slice(i, i + BATCH_SIZE);
-          Promise.all(
-            batch.map(ch =>
-              invoke<{ epg_listings: EpgListing[] }>("get_channel_epg", {
-                name: profileName,
-                streamId: ch.stream_id,
-              }).catch(() => ({ epg_listings: [] }))
-            )
-          ).then(results => {
-            setEpg(prev => {
-              const map = { ...prev };
-              batch.forEach((ch, j) => { map[ch.stream_id] = results[j].epg_listings; });
+        invoke<Record<string, EpgListing[]>>("get_all_epg", { name: profileName })
+          .then(allEpg => {
+            if (cancelled) return;
+            setEpg(() => {
+              const map: Record<number, EpgListing[]> = {};
+              for (const ch of chs) {
+                if (ch.epg_channel_id && allEpg[ch.epg_channel_id]) {
+                  map[ch.stream_id] = allEpg[ch.epg_channel_id];
+                }
+              }
               return map;
             });
-          });
-        }
+          })
+          .catch(() => {});
       })
-      .catch(() => setLoading(false));
+      .catch(() => { if (!cancelled) setLoading(false); });
 
     const tick = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 30000);
-    return () => clearInterval(tick);
+    return () => {
+      cancelled = true;
+      clearInterval(tick);
+    };
   }, [categoryId]);
 
   function getCurrentListing(streamId: number): EpgListing | undefined {

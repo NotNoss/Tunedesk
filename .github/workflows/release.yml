@@ -62,3 +62,54 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Post-process AppImage (strip conflicting system libraries)
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          APPIMAGE=$(find src-tauri/target/release/bundle/appimage -name "*.AppImage" | head -1)
+          APPIMAGE_NAME=$(basename "$APPIMAGE")
+          APPIMAGE_DIR=$(dirname "$APPIMAGE")
+
+          # Extract and remove libs that conflict with system Wayland/EGL/GL stack
+          chmod +x "$APPIMAGE"
+          "$APPIMAGE" --appimage-extract
+          find squashfs-root/usr/lib -name "libwayland-*"   -delete 2>/dev/null || true
+          find squashfs-root/usr/lib -name "libEGL*"        -delete 2>/dev/null || true
+          find squashfs-root/usr/lib -name "libGL*"         -delete 2>/dev/null || true
+          find squashfs-root/usr/lib -name "libGLdispatch*" -delete 2>/dev/null || true
+          find squashfs-root/usr/lib -name "libGLESv2*"     -delete 2>/dev/null || true
+
+          # Repackage
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" -O appimagetool
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool squashfs-root "$APPIMAGE"
+          rm -rf squashfs-root appimagetool
+
+          # Re-create and re-sign the updater tarball
+          pushd "$APPIMAGE_DIR"
+          tar -czf "${APPIMAGE_NAME}.tar.gz" "$APPIMAGE_NAME"
+          popd
+          pnpm tauri signer sign \
+            -k "$TAURI_SIGNING_PRIVATE_KEY" \
+            -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
+            "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz"
+
+          # Replace the published release assets with the fixed versions
+          gh release upload "${{ github.ref_name }}" \
+            "$APPIMAGE" \
+            "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz" \
+            "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz.sig" \
+            --clobber
+
+          # Update the signature in latest.json so the in-app updater stays in sync
+          NEW_SIG=$(cat "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz.sig")
+          gh release download "${{ github.ref_name }}" -p "latest.json" -D /tmp/
+          jq --arg sig "$NEW_SIG" \
+            '.platforms["linux-x86_64"].signature = $sig' \
+            /tmp/latest.json > /tmp/latest.json.new
+          mv /tmp/latest.json.new /tmp/latest.json
+          gh release upload "${{ github.ref_name }}" /tmp/latest.json --clobber

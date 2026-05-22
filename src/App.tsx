@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import AboutModal from "./components/AboutModal";
+import FetchToast from "./components/FetchToast";
 import ContentDetail from "./components/ContentDetail/ContentDetail";
 import EditProfileModal from "./components/EditProfileModal";
 import MenuBar from "./components/MenuBar";
@@ -387,6 +388,7 @@ function App() {
           onSaved={loadProfiles}
         />
       )}
+      <FetchToast />
     </div>
   );
 }

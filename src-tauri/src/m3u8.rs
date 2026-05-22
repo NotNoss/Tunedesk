@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::logs::{log_debug, log_info};
 use crate::cache::{
@@ -138,24 +138,30 @@ pub fn get_stream_url_m3u8(app: &tauri::AppHandle, name: &str, stream_id: u64) -
 
 async fn fetch_m3u8(app: &tauri::AppHandle, name: &str, url: &str) -> Result<(), String> {
     log_info(app, "m3u8", format!("Fetching M3U8 playlist for '{name}'"));
+    let event_id = format!("m3u8:{name}");
+    let _ = app.emit("fetch:start", serde_json::json!({ "id": event_id, "message": format!("Pulling playlist from {name}") }));
     let resp = reqwest::get(url).await.map_err(|e| {
         let msg = format!("Failed to fetch M3U8 playlist for '{name}': {e}");
         log_info(app, "m3u8", &msg);
+        let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
         msg
     })?;
     if !resp.status().is_success() {
         let msg = format!("M3U8 URL returned HTTP {} for '{name}'", resp.status());
         log_info(app, "m3u8", &msg);
+        let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
         return Err(msg);
     }
     let text = resp.text().await.map_err(|e| {
         let msg = format!("Failed to read M3U8 response body for '{name}': {e}");
         log_info(app, "m3u8", &msg);
+        let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
         msg
     })?;
     log_debug(app, "m3u8", format!("Parsing M3U8 playlist for '{name}' ({} bytes)", text.len()));
     parse_and_store_m3u8(app, name, &text);
     log_info(app, "m3u8", format!("M3U8 playlist loaded for '{name}'"));
+    let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
     Ok(())
 }
 
@@ -178,11 +184,18 @@ fn parse_and_store_m3u8(app: &tauri::AppHandle, name: &str, text: &str) {
         let tvg_logo = attr_value(line, "tvg-logo").unwrap_or("");
         let channel_name = line.rsplit(',').next().unwrap_or("").trim();
 
-        let url_line = match lines.next() {
-            Some(l) => l.trim(),
-            None => continue,
+        let url_line = loop {
+            match lines.next() {
+                None => break "",
+                Some(l) => {
+                    let l = l.trim();
+                    if !l.is_empty() && !l.starts_with('#') {
+                        break l;
+                    }
+                }
+            }
         };
-        if url_line.is_empty() || url_line.starts_with('#') {
+        if url_line.is_empty() {
             continue;
         }
 
@@ -239,11 +252,14 @@ fn attr_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
 
 async fn fetch_epg(app: &tauri::AppHandle, name: &str, url: &str) -> Result<(), String> {
     log_info(app, "m3u8", format!("Fetching EPG for '{name}'"));
+    let event_id = format!("epg:{name}");
+    let _ = app.emit("fetch:start", serde_json::json!({ "id": event_id, "message": format!("Pulling EPG from {name}") }));
     let bytes = reqwest::get(url)
         .await
         .map_err(|e| {
             let msg = format!("Failed to fetch EPG for '{name}': {e}");
             log_info(app, "m3u8", &msg);
+            let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
             msg
         })?
         .bytes()
@@ -251,15 +267,19 @@ async fn fetch_epg(app: &tauri::AppHandle, name: &str, url: &str) -> Result<(), 
         .map_err(|e| {
             let msg = format!("Failed to read EPG response body for '{name}': {e}");
             log_info(app, "m3u8", &msg);
+            let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
             msg
         })?;
     log_debug(app, "m3u8", format!("Parsing EPG for '{name}' ({} bytes)", bytes.len()));
     parse_and_store_epg(app, name, &bytes);
     log_info(app, "m3u8", format!("EPG loaded for '{name}'"));
+    let _ = app.emit("fetch:end", serde_json::json!({ "id": event_id }));
     Ok(())
 }
 
-fn parse_and_store_epg(app: &tauri::AppHandle, name: &str, data: &[u8]) {
+// Parse XMLTV bytes into a map of channel_id -> EPG listings.
+// Shared by both M3U8 profiles (from epg_url) and Xtream profiles (from xmltv.php).
+pub fn parse_epg_xml(data: &[u8]) -> HashMap<String, Vec<serde_json::Value>> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
@@ -345,8 +365,12 @@ fn parse_and_store_epg(app: &tauri::AppHandle, name: &str, data: &[u8]) {
         }
     }
 
-    log_debug(app, "m3u8", format!("Parsed EPG for '{name}': {} channels", epg.len()));
+    epg
+}
 
+fn parse_and_store_epg(app: &tauri::AppHandle, name: &str, data: &[u8]) {
+    let epg = parse_epg_xml(data);
+    log_debug(app, "m3u8", format!("Parsed EPG for '{name}': {} channels", epg.len()));
     let state = app.state::<AppCacheState>();
     let mut cache = state.0.lock().unwrap();
     let pc = cache.entry(name.to_string()).or_default();

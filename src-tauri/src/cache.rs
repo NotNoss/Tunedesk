@@ -64,6 +64,12 @@ pub struct ProfileCache {
     pub m3u8_epg: HashMap<String, Vec<serde_json::Value>>,
     #[serde(skip)]
     pub m3u8_epg_at: i64,
+
+    // Xtream bulk XMLTV EPG: in-memory only, keyed by epg_channel_id
+    #[serde(skip)]
+    pub xtream_epg: HashMap<String, Vec<serde_json::Value>>,
+    #[serde(skip)]
+    pub xtream_epg_at: i64,
 }
 
 pub struct AppCacheState(pub Mutex<HashMap<String, ProfileCache>>);

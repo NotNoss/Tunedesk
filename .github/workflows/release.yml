@@ -14,7 +14,7 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
-            args: '--bundles appimage'
+            args: '--bundles appimage,deb'
           - platform: windows-latest
             args: '--bundles nsis'
 

@@ -90,27 +90,21 @@ jobs:
           ARCH=x86_64 ./appimagetool squashfs-root "$APPIMAGE"
           rm -rf squashfs-root appimagetool
 
-          # Re-create and re-sign the updater tarball
-          pushd "$APPIMAGE_DIR"
-          tar -czf "${APPIMAGE_NAME}.tar.gz" "$APPIMAGE_NAME"
-          popd
+          # Sign the modified AppImage directly (URL in latest.json points to raw AppImage)
           pnpm tauri signer sign \
             -k "$TAURI_SIGNING_PRIVATE_KEY" \
             -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" \
-            "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz"
+            "$APPIMAGE"
+          APPIMAGE_SIG=$(cat "${APPIMAGE}.sig")
 
-          # Replace the published release assets with the fixed versions
-          gh release upload "${{ github.ref_name }}" \
-            "$APPIMAGE" \
-            "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz" \
-            "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz.sig" \
-            --clobber
+          # Replace the published AppImage with the fixed version
+          gh release upload "${{ github.ref_name }}" "$APPIMAGE" --clobber
 
-          # Update the signature in latest.json so the in-app updater stays in sync
-          NEW_SIG=$(cat "${APPIMAGE_DIR}/${APPIMAGE_NAME}.tar.gz.sig")
+          # Update both AppImage platform entries in latest.json with the new signature
           gh release download "${{ github.ref_name }}" -p "latest.json" -D /tmp/
-          jq --arg sig "$NEW_SIG" \
-            '.platforms["linux-x86_64"].signature = $sig' \
-            /tmp/latest.json > /tmp/latest.json.new
+          jq --arg sig "$APPIMAGE_SIG" '
+            .platforms["linux-x86_64"].signature = $sig |
+            .platforms["linux-x86_64-appimage"].signature = $sig
+          ' /tmp/latest.json > /tmp/latest.json.new
           mv /tmp/latest.json.new /tmp/latest.json
           gh release upload "${{ github.ref_name }}" /tmp/latest.json --clobber

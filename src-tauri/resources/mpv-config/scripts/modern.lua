@@ -196,6 +196,14 @@ local state = {
     fulltime = user_opts.timems,
     highlight_element = 'cy_audio',
     chapter_list = {},                      -- sorted by time
+    sub_menu_open = false,
+    sub_menu_scroll = 0,
+    sub_menu_geo = nil,
+    sub_menu_hover = nil,
+    audio_menu_open = false,
+    audio_menu_scroll = 0,
+    audio_menu_geo = nil,
+    audio_menu_hover = nil,
 }
 
 local thumbfast = {
@@ -207,6 +215,11 @@ local thumbfast = {
 
 local window_control_box_width = 138
 local tick_delay = 0.03
+
+local sub_menu_row_h = 22
+local sub_menu_max_rows = 7
+local sub_menu_width = 220
+local sub_menu_padding = 6
 
 local is_december = os.date("*t").month == 12
 
@@ -660,6 +673,251 @@ function prepare_elements()
         end
 
     end
+end
+
+--
+-- Subtitle track popup menu
+--
+
+function get_sub_menu_items()
+    local items = {}
+    local current_sub = get_track('sub')
+    table.insert(items, {id = 'no', label = texts.off, selected = (current_sub == 0)})
+    for n = 1, #tracks_osc.sub do
+        local track = tracks_osc.sub[n]
+        local lang = track.lang or 'unknown'
+        local title = track.title or ''
+        local label = '[' .. lang .. ']'
+        if title ~= '' then label = label .. ' ' .. title end
+        table.insert(items, {id = track.id, label = label, selected = (n == current_sub)})
+    end
+    return items
+end
+
+function render_sub_menu(master_ass)
+    if not state.sub_menu_open then
+        state.sub_menu_geo = nil
+        return
+    end
+
+    if not tracks_osc or not tracks_osc.sub or #tracks_osc.sub == 0 then
+        state.sub_menu_open = false
+        state.sub_menu_geo = nil
+        return
+    end
+
+    local items = get_sub_menu_items()
+    local n_items = #items
+    local n_visible = math.min(n_items, sub_menu_max_rows)
+    local max_scroll = math.max(0, n_items - n_visible)
+    state.sub_menu_scroll = math.max(0, math.min(state.sub_menu_scroll, max_scroll))
+
+    local menu_h = n_visible * sub_menu_row_h + sub_menu_padding * 2
+    local menu_w = sub_menu_width
+
+    -- cy_sub button: x=87, y=playresy-40, an=5, w=24, h=24 → left=75, top=playresy-52
+    local btn_left = 75
+    local btn_top = osc_param.playresy - 52
+    local menu_left = math.max(5, math.min(btn_left, osc_param.playresx - menu_w - 5))
+    local menu_top = btn_top - menu_h - 4
+    local menu_bottom = menu_top + menu_h
+
+    local ass = assdraw.ass_new()
+    ass:append('{}') -- ensure first new_event() gets a preceding newline when merged
+
+    -- Background box
+    ass:new_event()
+    ass:pos(menu_left, menu_top)
+    ass:an(7)
+    ass:append('{\\blur0\\bord1\\1c&H1A1A1A&\\3c&H666666&\\1a&H18&\\3a&H80&}')
+    ass:draw_start()
+    ass:round_rect_cw(0, 0, menu_w, menu_h, 4)
+    ass:draw_stop()
+
+    -- Items
+    for i = 1, n_visible do
+        local abs_idx = i + state.sub_menu_scroll
+        local item = items[abs_idx]
+        if not item then break end
+
+        local item_top = menu_top + sub_menu_padding + (i - 1) * sub_menu_row_h
+        local is_hovered = (state.sub_menu_hover == abs_idx)
+
+        if item.selected or is_hovered then
+            ass:new_event()
+            ass:pos(menu_left + 2, item_top + 1)
+            ass:an(7)
+            if item.selected then
+                ass:append('{\\blur0\\bord0\\1c&H705030&\\1a&H28&}')
+            else
+                ass:append('{\\blur0\\bord0\\1c&H404040&\\1a&H38&}')
+            end
+            ass:draw_start()
+            ass:round_rect_cw(0, 0, menu_w - 4, sub_menu_row_h - 2, 2)
+            ass:draw_stop()
+        end
+
+        local marker = item.selected and '●' or '○'
+        ass:new_event()
+        ass:pos(menu_left + sub_menu_padding + 4, item_top + sub_menu_row_h / 2)
+        ass:an(4)
+        ass:append(string.format(
+            '{\\blur0\\bord0.5\\1c&HFFFFFF&\\3c&H000000&\\fs13\\fn%s}%s %s',
+            user_opts.font, marker, item.label))
+    end
+
+    -- Scroll arrows
+    if state.sub_menu_scroll > 0 then
+        ass:new_event()
+        ass:pos(menu_left + menu_w / 2, menu_top + 2)
+        ass:an(8)
+        ass:append(string.format('{\\blur0\\bord0\\1c&HCCCCCC&\\fs8\\fn%s}▲', user_opts.font))
+    end
+    if state.sub_menu_scroll < max_scroll then
+        ass:new_event()
+        ass:pos(menu_left + menu_w / 2, menu_top + menu_h - 2)
+        ass:an(2)
+        ass:append(string.format('{\\blur0\\bord0\\1c&HCCCCCC&\\fs8\\fn%s}▼', user_opts.font))
+    end
+
+    master_ass:merge(ass)
+
+    state.sub_menu_geo = {
+        left = menu_left,
+        top = menu_top,
+        right = menu_left + menu_w,
+        bottom = menu_bottom,
+        items_top = menu_top + sub_menu_padding,
+        items = items,
+        n_visible = n_visible,
+        scroll = state.sub_menu_scroll,
+        max_scroll = max_scroll,
+    }
+
+    -- Extend the input mouse area to cover the popup so clicks register
+    set_virt_mouse_area(0, menu_top, osc_param.playresx, osc_param.playresy, 'input')
+end
+
+--
+-- Audio track popup menu
+--
+
+function get_audio_menu_items()
+    local items = {}
+    local current_audio = get_track('audio')
+    table.insert(items, {id = 'no', label = texts.off, selected = (current_audio == 0)})
+    for n = 1, #tracks_osc.audio do
+        local track = tracks_osc.audio[n]
+        local lang = track.lang or 'unknown'
+        local title = track.title or ''
+        local label = '[' .. lang .. ']'
+        if title ~= '' then label = label .. ' ' .. title end
+        table.insert(items, {id = track.id, label = label, selected = (n == current_audio)})
+    end
+    return items
+end
+
+function render_audio_menu(master_ass)
+    if not state.audio_menu_open then
+        state.audio_menu_geo = nil
+        return
+    end
+
+    if not tracks_osc or not tracks_osc.audio or #tracks_osc.audio == 0 then
+        state.audio_menu_open = false
+        state.audio_menu_geo = nil
+        return
+    end
+
+    local items = get_audio_menu_items()
+    local n_items = #items
+    local n_visible = math.min(n_items, sub_menu_max_rows)
+    local max_scroll = math.max(0, n_items - n_visible)
+    state.audio_menu_scroll = math.max(0, math.min(state.audio_menu_scroll, max_scroll))
+
+    local menu_h = n_visible * sub_menu_row_h + sub_menu_padding * 2
+    local menu_w = sub_menu_width
+
+    -- cy_audio button: x=37, y=playresy-40, an=5, w=24, h=24 → left=25, top=playresy-52
+    local btn_left = 25
+    local btn_top = osc_param.playresy - 52
+    local menu_left = math.max(5, math.min(btn_left, osc_param.playresx - menu_w - 5))
+    local menu_top = btn_top - menu_h - 4
+    local menu_bottom = menu_top + menu_h
+
+    local ass = assdraw.ass_new()
+    ass:append('{}')
+
+    -- Background box
+    ass:new_event()
+    ass:pos(menu_left, menu_top)
+    ass:an(7)
+    ass:append('{\\blur0\\bord1\\1c&H1A1A1A&\\3c&H666666&\\1a&H18&\\3a&H80&}')
+    ass:draw_start()
+    ass:round_rect_cw(0, 0, menu_w, menu_h, 4)
+    ass:draw_stop()
+
+    -- Items
+    for i = 1, n_visible do
+        local abs_idx = i + state.audio_menu_scroll
+        local item = items[abs_idx]
+        if not item then break end
+
+        local item_top = menu_top + sub_menu_padding + (i - 1) * sub_menu_row_h
+        local is_hovered = (state.audio_menu_hover == abs_idx)
+
+        if item.selected or is_hovered then
+            ass:new_event()
+            ass:pos(menu_left + 2, item_top + 1)
+            ass:an(7)
+            if item.selected then
+                ass:append('{\\blur0\\bord0\\1c&H705030&\\1a&H28&}')
+            else
+                ass:append('{\\blur0\\bord0\\1c&H404040&\\1a&H38&}')
+            end
+            ass:draw_start()
+            ass:round_rect_cw(0, 0, menu_w - 4, sub_menu_row_h - 2, 2)
+            ass:draw_stop()
+        end
+
+        local marker = item.selected and '●' or '○'
+        ass:new_event()
+        ass:pos(menu_left + sub_menu_padding + 4, item_top + sub_menu_row_h / 2)
+        ass:an(4)
+        ass:append(string.format(
+            '{\\blur0\\bord0.5\\1c&HFFFFFF&\\3c&H000000&\\fs13\\fn%s}%s %s',
+            user_opts.font, marker, item.label))
+    end
+
+    -- Scroll arrows
+    if state.audio_menu_scroll > 0 then
+        ass:new_event()
+        ass:pos(menu_left + menu_w / 2, menu_top + 2)
+        ass:an(8)
+        ass:append(string.format('{\\blur0\\bord0\\1c&HCCCCCC&\\fs8\\fn%s}▲', user_opts.font))
+    end
+    if state.audio_menu_scroll < max_scroll then
+        ass:new_event()
+        ass:pos(menu_left + menu_w / 2, menu_top + menu_h - 2)
+        ass:an(2)
+        ass:append(string.format('{\\blur0\\bord0\\1c&HCCCCCC&\\fs8\\fn%s}▼', user_opts.font))
+    end
+
+    master_ass:merge(ass)
+
+    state.audio_menu_geo = {
+        left = menu_left,
+        top = menu_top,
+        right = menu_left + menu_w,
+        bottom = menu_bottom,
+        items_top = menu_top + sub_menu_padding,
+        items = items,
+        n_visible = n_visible,
+        scroll = state.audio_menu_scroll,
+        max_scroll = max_scroll,
+    }
+
+    set_virt_mouse_area(0, menu_top, osc_param.playresx, osc_param.playresy, 'input')
 end
 
 --
@@ -1555,32 +1813,27 @@ function osc_init()
     ne.off = (get_track('audio') == 0)
     ne.visible = (osc_param.playresx >= 540)
     ne.content = icons.audio
-    ne.tooltip_style = osc_styles.Tooltip
-    ne.tooltipF = function ()
-		local msg = texts.off
-        if not (get_track('audio') == 0) then
-            msg = (texts.audio .. ' [' .. get_track('audio') .. ' ∕ ' .. #tracks_osc.audio .. '] ')
-            local prop = mp.get_property('current-tracks/audio/title') --('current-tracks/audio/lang')
-            if not prop then
-				prop = texts.na
-			end
-			msg = msg .. '[' .. prop .. ']'
-			prop = mp.get_property('current-tracks/audio/lang') --('current-tracks/audio/title')
-			if prop then
-				msg = msg .. ' ' .. prop
-			end
-			return msg
-        end
-        return msg
-    end
     ne.eventresponder['mbtn_left_up'] =
-        function () set_track('audio', 1) end
+        function ()
+            state.audio_menu_open = true
+            state.audio_menu_scroll = 0
+            state.audio_menu_hover = nil
+            request_tick()
+        end
     ne.eventresponder['mbtn_right_up'] =
-        function () set_track('audio', -1) end
-    ne.eventresponder['shift+mbtn_left_down'] =
-        function () show_message(get_tracklist('audio')) end
+        function ()
+            state.audio_menu_open = true
+            state.audio_menu_scroll = 0
+            state.audio_menu_hover = nil
+            request_tick()
+        end
     ne.eventresponder['enter'] =
-        function () set_track('audio', 1); show_message(get_tracklist('audio')) end
+        function ()
+            state.audio_menu_open = true
+            state.audio_menu_scroll = 0
+            state.audio_menu_hover = nil
+            request_tick()
+        end
                 
     --cy_sub
     ne = new_element('cy_sub', 'button')
@@ -1588,32 +1841,27 @@ function osc_init()
     ne.off = (get_track('sub') == 0)
     ne.visible = (osc_param.playresx >= 600)
     ne.content = icons.sub
-    ne.tooltip_style = osc_styles.Tooltip
-    ne.tooltipF = function ()
-		local msg = texts.off
-        if not (get_track('sub') == 0) then
-            msg = (texts.subtitle .. ' [' .. get_track('sub') .. ' ∕ ' .. #tracks_osc.sub .. '] ')
-            local prop = mp.get_property('current-tracks/sub/lang')
-            if not prop then
-				prop = texts.na
-			end
-			msg = msg .. '[' .. prop .. ']'
-			prop = mp.get_property('current-tracks/sub/title')
-			if prop then
-				msg = msg .. ' ' .. prop
-			end
-			return msg
-        end
-        return msg
-    end
     ne.eventresponder['mbtn_left_up'] =
-        function () set_track('sub', 1) end
+        function ()
+            state.sub_menu_open = true
+            state.sub_menu_scroll = 0
+            state.sub_menu_hover = nil
+            request_tick()
+        end
     ne.eventresponder['mbtn_right_up'] =
-        function () set_track('sub', -1) end
-    ne.eventresponder['shift+mbtn_left_down'] =
-        function () show_message(get_tracklist('sub')) end
+        function ()
+            state.sub_menu_open = true
+            state.sub_menu_scroll = 0
+            state.sub_menu_hover = nil
+            request_tick()
+        end
     ne.eventresponder['enter'] =
-        function () set_track('sub', 1); show_message(get_tracklist('sub')) end
+        function ()
+            state.sub_menu_open = true
+            state.sub_menu_scroll = 0
+            state.sub_menu_hover = nil
+            request_tick()
+        end
     
     -- vol_ctrl
     ne = new_element('vol_ctrl', 'button')
@@ -1885,6 +2133,12 @@ end
 
 function hide_osc()
     msg.trace('hide_osc')
+    state.sub_menu_open = false
+    state.sub_menu_geo = nil
+    state.sub_menu_hover = nil
+    state.audio_menu_open = false
+    state.audio_menu_geo = nil
+    state.audio_menu_hover = nil
     if not state.enabled then
         -- typically hide happens at render() from tick(), but now tick() is
         -- no-op and won't render again to remove the osc, so do that manually.
@@ -2137,6 +2391,12 @@ function render()
         render_elements(ass)
     end
 
+    -- Subtitle track selection menu
+    render_sub_menu(ass)
+
+    -- Audio track selection menu
+    render_audio_menu(ass)
+
     -- submit
     set_osd(osc_param.playresy * osc_param.display_aspect,
             osc_param.playresy, ass.text)
@@ -2154,6 +2414,113 @@ end
 function process_event(source, what)
     local action = string.format('%s%s', source,
         what and ('_' .. what) or '')
+
+    -- Sub menu event handling
+    if state.sub_menu_open then
+        if source == 'mouse_move' then
+            -- Update hover highlight while keeping normal mouse_move behavior
+            local geo = state.sub_menu_geo
+            if geo then
+                local mx, my = get_virt_mouse_pos()
+                if mx >= geo.left and mx <= geo.right and my >= geo.top and my <= geo.bottom then
+                    local raw_idx = math.floor((my - geo.items_top) / sub_menu_row_h)
+                    state.sub_menu_hover = (raw_idx >= 0 and raw_idx < geo.n_visible) and (raw_idx + geo.scroll + 1) or nil
+                else
+                    state.sub_menu_hover = nil
+                end
+            end
+            -- fall through to normal mouse_move handling
+        else
+            local geo = state.sub_menu_geo
+            if what == 'up' and source == 'mbtn_left' then
+                local mx, my = get_virt_mouse_pos()
+                if geo and mx >= geo.left and mx <= geo.right and my >= geo.top and my <= geo.bottom then
+                    local raw_idx = math.floor((my - geo.items_top) / sub_menu_row_h)
+                    if raw_idx >= 0 and raw_idx < geo.n_visible then
+                        local item = geo.items[raw_idx + 1 + geo.scroll]
+                        if item then
+                            mp.commandv('set', 'sub', item.id == 'no' and 'no' or tostring(item.id))
+                        end
+                    end
+                end
+                state.sub_menu_open = false
+                state.sub_menu_geo = nil
+                state.sub_menu_hover = nil
+                state.active_element = nil
+                state.mouse_down_counter = 0
+                request_tick()
+                return
+            end
+            if what == 'press' and geo then
+                local mx, my = get_virt_mouse_pos()
+                if mx >= geo.left and mx <= geo.right and my >= geo.top and my <= geo.bottom then
+                    if source == 'wheel_up' then
+                        state.sub_menu_scroll = math.max(0, state.sub_menu_scroll - 1)
+                        request_tick()
+                        return
+                    elseif source == 'wheel_down' then
+                        state.sub_menu_scroll = math.min(geo.max_scroll, state.sub_menu_scroll + 1)
+                        request_tick()
+                        return
+                    end
+                end
+            end
+            -- Consume all other button/wheel events while menu is open
+            return
+        end
+    end
+
+    -- Audio menu event handling
+    if state.audio_menu_open then
+        if source == 'mouse_move' then
+            local geo = state.audio_menu_geo
+            if geo then
+                local mx, my = get_virt_mouse_pos()
+                if mx >= geo.left and mx <= geo.right and my >= geo.top and my <= geo.bottom then
+                    local raw_idx = math.floor((my - geo.items_top) / sub_menu_row_h)
+                    state.audio_menu_hover = (raw_idx >= 0 and raw_idx < geo.n_visible) and (raw_idx + geo.scroll + 1) or nil
+                else
+                    state.audio_menu_hover = nil
+                end
+            end
+        else
+            local geo = state.audio_menu_geo
+            if what == 'up' and source == 'mbtn_left' then
+                local mx, my = get_virt_mouse_pos()
+                if geo and mx >= geo.left and mx <= geo.right and my >= geo.top and my <= geo.bottom then
+                    local raw_idx = math.floor((my - geo.items_top) / sub_menu_row_h)
+                    if raw_idx >= 0 and raw_idx < geo.n_visible then
+                        local item = geo.items[raw_idx + 1 + geo.scroll]
+                        if item then
+                            mp.commandv('set', 'audio', item.id == 'no' and 'no' or tostring(item.id))
+                        end
+                    end
+                end
+                state.audio_menu_open = false
+                state.audio_menu_geo = nil
+                state.audio_menu_hover = nil
+                state.active_element = nil
+                state.mouse_down_counter = 0
+                request_tick()
+                return
+            end
+            if what == 'press' and geo then
+                local mx, my = get_virt_mouse_pos()
+                if mx >= geo.left and mx <= geo.right and my >= geo.top and my <= geo.bottom then
+                    if source == 'wheel_up' then
+                        state.audio_menu_scroll = math.max(0, state.audio_menu_scroll - 1)
+                        request_tick()
+                        return
+                    elseif source == 'wheel_down' then
+                        state.audio_menu_scroll = math.min(geo.max_scroll, state.audio_menu_scroll + 1)
+                        request_tick()
+                        return
+                    end
+                end
+            end
+            return
+        end
+    end
 
     if what == 'down' or what == 'press' then
 

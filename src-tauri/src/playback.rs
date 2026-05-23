@@ -10,10 +10,20 @@ use crate::logs::{log_debug, log_info};
 pub fn mpv_executable() -> PathBuf {
     let binary_name = if cfg!(target_os = "windows") { "mpv.exe" } else { "mpv" };
 
-    if let Ok(exe) = std::env::current_exe() {
-        let candidate = exe.parent().map(|d| d.join(binary_name));
-        if let Some(path) = candidate.filter(|p| p.exists()) {
-            return path;
+    // On Linux, only use the bundled binary inside an AppImage. The .deb installs
+    // the binary to /usr/bin/mpv which conflicts with the system mpv package, so
+    // for .deb we rely on system mpv via PATH instead.
+    #[cfg(target_os = "linux")]
+    let check_bundled = std::env::var_os("APPIMAGE").is_some();
+    #[cfg(not(target_os = "linux"))]
+    let check_bundled = true;
+
+    if check_bundled {
+        if let Ok(exe) = std::env::current_exe() {
+            let candidate = exe.parent().map(|d| d.join(binary_name));
+            if let Some(path) = candidate.filter(|p| p.exists()) {
+                return path;
+            }
         }
     }
 

@@ -108,3 +108,16 @@ jobs:
           ' /tmp/latest.json > /tmp/latest.json.new
           mv /tmp/latest.json.new /tmp/latest.json
           gh release upload "${{ github.ref_name }}" /tmp/latest.json --clobber
+
+      - name: Post-process deb (remove bundled mpv to avoid system package conflict)
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DEB=$(find src-tauri/target/release/bundle/deb -name "*.deb" | head -1)
+          mkdir -p /tmp/deb-repack
+          dpkg-deb -R "$DEB" /tmp/deb-repack/
+          rm -f /tmp/deb-repack/usr/bin/mpv
+          dpkg-deb -b /tmp/deb-repack/ "$DEB"
+          rm -rf /tmp/deb-repack/
+          gh release upload "${{ github.ref_name }}" "$DEB" --clobber

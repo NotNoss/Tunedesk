@@ -297,7 +297,7 @@ async fn run_live_mpv(app: &tauri::AppHandle, url: String) -> Result<(), String>
     }
 
     let mpv = crate::playback::mpv_executable();
-    let mut child = std::process::Command::new(&mpv)
+    let mut child = crate::playback::mpv_command()
         .args(&args)
         .spawn()
         .map_err(|e| {

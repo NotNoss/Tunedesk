@@ -30,6 +30,23 @@ pub fn mpv_executable() -> PathBuf {
     PathBuf::from(binary_name)
 }
 
+// Returns a Command for the mpv binary with the environment correctly set up.
+// Inside an AppImage, LD_LIBRARY_PATH is overridden to point at bundled libs;
+// system mpv needs the original path restored so it can find its own libraries.
+pub fn mpv_command() -> std::process::Command {
+    let mut cmd = std::process::Command::new(mpv_executable());
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("APPIMAGE").is_some() {
+        let orig = std::env::var("LD_LIBRARY_PATH_ORIG").unwrap_or_default();
+        if orig.is_empty() {
+            cmd.env_remove("LD_LIBRARY_PATH");
+        } else {
+            cmd.env("LD_LIBRARY_PATH", orig);
+        }
+    }
+    cmd
+}
+
 pub async fn launch_mpv(app: &tauri::AppHandle, url: String, key: String, start_over: bool, profile: &str) -> Result<(), String> {
     let pid = std::process::id();
     let temp_dir = std::env::temp_dir();
@@ -126,21 +143,8 @@ async fn run_mpv(app: &tauri::AppHandle, key: &str, url: String, start_pos: f64,
     let mpv = mpv_executable();
     log_debug(app, "playback", format!("mpv binary: {}", mpv.display()));
 
-    let mut cmd = std::process::Command::new(&mpv);
-    cmd.args(&args);
-
-    // Inside an AppImage, LD_LIBRARY_PATH is set to bundled libs that conflict
-    // with system mpv. Restore the pre-AppImage path so mpv resolves its own libs.
-    if std::env::var_os("APPIMAGE").is_some() {
-        let orig = std::env::var("LD_LIBRARY_PATH_ORIG").unwrap_or_default();
-        if orig.is_empty() {
-            cmd.env_remove("LD_LIBRARY_PATH");
-        } else {
-            cmd.env("LD_LIBRARY_PATH", orig);
-        }
-    }
-
-    let mut child = cmd
+    let mut child = mpv_command()
+        .args(&args)
         .spawn()
         .map_err(|e| {
             let msg = format!("Failed to launch mpv ({}): {e}", mpv.display());

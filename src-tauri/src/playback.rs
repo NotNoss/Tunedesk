@@ -100,16 +100,7 @@ end)"#,
     log_info(app, "playback", format!("Launching mpv for '{key}' (profile: {profile}, start: {start_pos:.1}s)"));
     log_debug(app, "playback", format!("mpv url: {url}"));
 
-    let window = app.get_webview_window("main");
-    if let Some(w) = &window {
-        let _ = w.hide();
-    }
-
     let result = run_mpv(app, &key, url, start_pos, &script_path).await;
-
-    if let Some(w) = &window {
-        let _ = w.show();
-    }
 
     let _ = std::fs::remove_file(&script_path);
     let _ = std::fs::remove_file(&pos_path);

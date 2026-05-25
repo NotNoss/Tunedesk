@@ -7,6 +7,8 @@ interface PreferencesModalProps {
   onThemeChange: (theme: "dark" | "light") => void;
   logLevel: "info" | "debug";
   onLogLevelChange: (level: "info" | "debug") => void;
+  autoPlayNext: boolean;
+  onAutoPlayNextChange: (value: boolean) => void;
   onClose: () => void;
 }
 
@@ -15,7 +17,7 @@ const LOG_LEVEL_OPTIONS = [
   { value: "debug", label: "Debug" },
 ];
 
-export default function PreferencesModal({ theme, onThemeChange, logLevel, onLogLevelChange, onClose }: PreferencesModalProps) {
+export default function PreferencesModal({ theme, onThemeChange, logLevel, onLogLevelChange, autoPlayNext, onAutoPlayNextChange, onClose }: PreferencesModalProps) {
   const isDark = theme === "dark";
   const [showClearCache, setShowClearCache] = useState(false);
 
@@ -96,6 +98,38 @@ export default function PreferencesModal({ theme, onThemeChange, logLevel, onLog
               options={LOG_LEVEL_OPTIONS}
             />
           </div>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "24px" }}>
+          <span style={{ color: "var(--color-text)", fontSize: "13px" }}>Auto-play next episode</span>
+          <button
+            onClick={() => onAutoPlayNextChange(!autoPlayNext)}
+            style={{
+              width: "44px",
+              height: "24px",
+              borderRadius: "12px",
+              border: "none",
+              background: autoPlayNext ? "#388bfd" : "var(--color-border)",
+              cursor: "pointer",
+              position: "relative",
+              transition: "background 0.2s",
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            <span
+              style={{
+                position: "absolute",
+                top: "3px",
+                left: autoPlayNext ? "23px" : "3px",
+                width: "18px",
+                height: "18px",
+                borderRadius: "50%",
+                background: "#ffffff",
+                transition: "left 0.2s",
+              }}
+            />
+          </button>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "24px" }}>

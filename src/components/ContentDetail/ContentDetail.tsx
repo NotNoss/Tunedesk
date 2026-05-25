@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ResumeModal from "../ResumeModal";
+import PlaybackLoadingModal from "../PlaybackLoadingModal";
 import SeasonDetail, { Episode } from "./SeasonDetail";
 import PlayButton from "../PlayButton";
 
@@ -28,6 +29,7 @@ type ContentDetailProps = (
   info: ContentInfo;
   profileName: string;
   onBack: () => void;
+  autoPlayNext?: boolean;
 };
 
 export default function ContentDetail(props: ContentDetailProps) {
@@ -37,6 +39,7 @@ export default function ContentDetail(props: ContentDetailProps) {
 
   const [movieProgress, setMovieProgress] = useState<ProgressEntry | null>(null);
   const [showResumeModal, setShowResumeModal] = useState(false);
+  const [showPlaybackModal, setShowPlaybackModal] = useState(false);
 
   useEffect(() => {
     if (movieStreamId === null) return;
@@ -53,6 +56,7 @@ export default function ContentDetail(props: ContentDetailProps) {
   function invokeMoviePlay(startOver: boolean) {
     if (props.type !== "movie") return;
     setShowResumeModal(false);
+    setShowPlaybackModal(true);
     invoke("play_vod", {
       name: profileName,
       streamId: props.streamId,
@@ -65,7 +69,8 @@ export default function ContentDetail(props: ContentDetailProps) {
           .then(r => setMovieProgress(r[key] ?? null))
           .catch(() => {});
       })
-      .catch(console.error);
+      .catch(console.error)
+      .finally(() => setShowPlaybackModal(false));
   }
 
   function handleMoviePlay() {
@@ -85,6 +90,9 @@ export default function ContentDetail(props: ContentDetailProps) {
           onStartOver={() => invokeMoviePlay(true)}
           onBack={() => setShowResumeModal(false)}
         />
+      )}
+      {showPlaybackModal && (
+        <PlaybackLoadingModal onCancel={() => setShowPlaybackModal(false)} />
       )}
 
       {/* Header */}
@@ -193,7 +201,7 @@ export default function ContentDetail(props: ContentDetailProps) {
       </div>
 
       {props.type === "series" && (
-        <SeasonDetail episodes={props.episodes} profileName={profileName} />
+        <SeasonDetail episodes={props.episodes} profileName={profileName} autoPlayNext={props.autoPlayNext ?? true} />
       )}
     </div>
   );

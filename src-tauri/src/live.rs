@@ -306,13 +306,24 @@ async fn run_live_mpv(app: &tauri::AppHandle, url: String) -> Result<(), String>
             msg
         })?;
 
-    tauri::async_runtime::spawn_blocking(move || child.wait())
+    {
+        let state = app.state::<crate::playback::MpvPidState>();
+        *state.0.lock().unwrap() = Some(child.id());
+    }
+
+    let wait_result = tauri::async_runtime::spawn_blocking(move || child.wait())
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| {
-            log_info(app, "live", format!("mpv exited with error: {e}"));
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
+
+    {
+        let state = app.state::<crate::playback::MpvPidState>();
+        *state.0.lock().unwrap() = None;
+    }
+
+    wait_result.map_err(|e| {
+        log_info(app, "live", format!("mpv exited with error: {e}"));
+        e.to_string()
+    })?;
 
     Ok(())
 }

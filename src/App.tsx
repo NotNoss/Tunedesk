@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import AboutModal from "./components/AboutModal";
 import FetchToast from "./components/FetchToast";
 import ContentDetail from "./components/ContentDetail/ContentDetail";
@@ -76,15 +77,17 @@ function App() {
   const [showNewProfile, setShowNewProfile] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    return (localStorage.getItem("theme") as "dark" | "light") ?? "dark";
-  });
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme === "light" ? "light" : "");
-    localStorage.setItem("theme", theme);
   }, [theme]);
+
+  async function handleThemeChange(newTheme: "dark" | "light") {
+    setTheme(newTheme);
+    await invoke("save_theme", { theme: newTheme }).catch(() => {});
+  }
   const [profiles, setProfiles] = useState<string[]>([]);
   const [m3u8Profiles, setM3u8Profiles] = useState<Set<string>>(new Set());
   const [profileIcons, setProfileIcons] = useState<Record<string, string>>({});
@@ -191,12 +194,21 @@ function App() {
     }
   }
 
+  const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
+
+  async function handleAutoPlayNextChange(value: boolean) {
+    setAutoPlayNext(value);
+    await invoke("save_auto_play_next", { value }).catch(() => {});
+  }
+
   const [logLevel, setLogLevel] = useState<"info" | "debug">("info");
 
   useEffect(() => {
     loadProfiles();
-    invoke<string>("get_log_level").then(level => {
-      setLogLevel(level as "info" | "debug");
+    invoke<{ theme?: string; auto_play_next?: boolean; log_level?: string }>("get_user_settings").then(s => {
+      if (s.theme === "light" || s.theme === "dark") setTheme(s.theme);
+      if (s.auto_play_next != null) setAutoPlayNext(s.auto_play_next);
+      if (s.log_level === "debug") setLogLevel("debug");
     }).catch(() => {});
     const unlisten = listen<string>("update-ready", (e) => setUpdateVersion(e.payload));
     return () => { unlisten.then(fn => fn()); };
@@ -207,7 +219,12 @@ function App() {
     await invoke("set_log_level", { level }).catch(() => {});
   }
 
-  function handleExit() {
+  async function handleExit() {
+    try {
+      const win = getCurrentWindow();
+      const [size, maximized] = await Promise.all([win.outerSize(), win.isMaximized()]);
+      await invoke("save_window_size", { width: size.width, height: size.height, maximized });
+    } catch {}
     invoke("exit_app");
   }
 
@@ -339,6 +356,7 @@ function App() {
                   }}
                   episodes={seriesInfo.episodes}
                   profileName={currentProfileName}
+                  autoPlayNext={autoPlayNext}
                   onBack={() => setSeriesInfo(null)}
                 />
               )}
@@ -354,6 +372,8 @@ function App() {
                 <ContentGrid
                   items={series.map(s => ({ id: s.series_id, name: s.name, image: s.cover }))}
                   onSelect={handleSeriesSelect}
+                  profileName={currentProfileName}
+                  keyPrefix="series"
                 />
               )}
               {!movieInfo && !seriesInfo && contentType === "live" && (
@@ -369,8 +389,9 @@ function App() {
           theme={theme}
           logLevel={logLevel}
           onLogLevelChange={handleLogLevelChange}
-          onThemeChange={setTheme}
-
+          onThemeChange={handleThemeChange}
+          autoPlayNext={autoPlayNext}
+          onAutoPlayNextChange={handleAutoPlayNextChange}
           onClose={() => setShowPreferences(false)}
         />
       )}

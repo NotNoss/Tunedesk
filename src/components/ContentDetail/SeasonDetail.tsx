@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ResumeModal from "../ResumeModal";
+import PlaybackLoadingModal from "../PlaybackLoadingModal";
+import ContextMenu from "../ContextMenu";
 
 export interface Episode {
   id: string;
@@ -24,38 +26,98 @@ interface ProgressEntry {
 interface SeasonDetailProps {
   episodes: Record<string, Episode[]>;
   profileName: string;
+  autoPlayNext: boolean;
 }
 
-export default function SeasonDetail({ episodes, profileName }: SeasonDetailProps) {
+export default function SeasonDetail({ episodes, profileName, autoPlayNext }: SeasonDetailProps) {
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, ProgressEntry>>({});
   const [watched, setWatched] = useState<Set<string>>(new Set());
   const [pendingEpisode, setPendingEpisode] = useState<Episode | null>(null);
+  const [showPlaybackModal, setShowPlaybackModal] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ep: Episode } | null>(null);
 
   const seasonKeys = Object.keys(episodes).sort((a, b) => parseInt(a) - parseInt(b));
 
-  function fetchProgress() {
+  async function fetchProgress() {
     const keys = Object.values(episodes).flat().map(ep => `episode_${ep.id}`);
     if (keys.length === 0) return;
-    invoke<Record<string, ProgressEntry>>("get_progress", { profile: profileName, keys })
-      .then(setEpisodeProgress)
-      .catch(() => {});
-    invoke<string[]>("get_watched", { profile: profileName, keys })
-      .then(w => setWatched(new Set(w)))
-      .catch(() => {});
+    const [progress, watchedList] = await Promise.all([
+      invoke<Record<string, ProgressEntry>>("get_progress", { profile: profileName, keys }).catch(() => ({} as Record<string, ProgressEntry>)),
+      invoke<string[]>("get_watched", { profile: profileName, keys }).catch(() => [] as string[]),
+    ]);
+    setEpisodeProgress(progress);
+    setWatched(new Set(watchedList));
   }
 
   useEffect(() => { fetchProgress(); }, [episodes]);
 
-  function invokeEpisodePlay(ep: Episode, startOver: boolean) {
+  function findNextEpisode(ep: Episode): Episode | null {
+    const currentSeasonKey = String(ep.season);
+    const currentSeasonEps = episodes[currentSeasonKey] ?? [];
+    const currentIdx = currentSeasonEps.findIndex(e => e.id === ep.id);
+
+    if (currentIdx >= 0 && currentIdx < currentSeasonEps.length - 1) {
+      return currentSeasonEps[currentIdx + 1];
+    }
+
+    const currentSeasonIdx = seasonKeys.indexOf(currentSeasonKey);
+    if (currentSeasonIdx >= 0 && currentSeasonIdx < seasonKeys.length - 1) {
+      const nextSeasonKey = seasonKeys[currentSeasonIdx + 1];
+      const nextSeasonEps = episodes[nextSeasonKey];
+      if (nextSeasonEps?.length > 0) {
+        return nextSeasonEps[0];
+      }
+    }
+
+    return null;
+  }
+
+  async function invokeEpisodePlay(ep: Episode, startOver: boolean) {
     setPendingEpisode(null);
-    invoke("play_episode", {
-      name: profileName,
-      episodeId: ep.id,
-      containerExtension: ep.container_extension ?? "",
-      startOver,
-    })
-      .then(() => fetchProgress())
-      .catch(console.error);
+    setShowPlaybackModal(true);
+
+    try {
+      await invoke("play_episode", {
+        name: profileName,
+        episodeId: ep.id,
+        containerExtension: ep.container_extension ?? "",
+        startOver,
+      });
+    } catch (e) {
+      invoke("log_event", { level: "info", module: "autoplay", message: `Episode playback error for S${ep.season}E${ep.episode_num}: ${e}` }).catch(() => {});
+      console.error(e);
+      fetchProgress();
+      setShowPlaybackModal(false);
+      return;
+    }
+
+    setShowPlaybackModal(false);
+
+    const keys = Object.values(episodes).flat().map(e => `episode_${e.id}`);
+    const [progress, watchedList] = await Promise.all([
+      invoke<Record<string, ProgressEntry>>("get_progress", { profile: profileName, keys }).catch(() => ({} as Record<string, ProgressEntry>)),
+      invoke<string[]>("get_watched", { profile: profileName, keys }).catch(() => [] as string[]),
+    ]);
+    setEpisodeProgress(progress);
+    const newWatched = new Set(watchedList);
+    setWatched(newWatched);
+
+    if (autoPlayNext) {
+      const epKey = `episode_${ep.id}`;
+      const prog = progress[epKey];
+      const isWatched = newWatched.has(epKey);
+      const pct = prog && prog.duration > 0 ? prog.position / prog.duration : 0;
+
+      if (isWatched || pct > 0.9) {
+        const next = findNextEpisode(ep);
+        if (next) {
+          invoke("log_event", { level: "info", module: "autoplay", message: `Auto-playing next episode: S${next.season}E${next.episode_num} "${next.title || `Episode ${next.episode_num}`}"` }).catch(() => {});
+          invokeEpisodePlay(next, false);
+        } else {
+          invoke("log_event", { level: "info", module: "autoplay", message: `Auto-play: no next episode after S${ep.season}E${ep.episode_num} — end of series` }).catch(() => {});
+        }
+      }
+    }
   }
 
   function handleEpisodePlay(ep: Episode) {
@@ -65,6 +127,26 @@ export default function SeasonDetail({ episodes, profileName }: SeasonDetailProp
     } else {
       invokeEpisodePlay(ep, false);
     }
+  }
+
+  function handleEpisodeContextMenu(e: React.MouseEvent, ep: Episode) {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, ep });
+  }
+
+  async function markEpisodeWatched(ep: Episode) {
+    const key = `episode_${ep.id}`;
+    await invoke("set_watched", { profile: profileName, keys: [key] }).catch(() => {});
+    setWatched(prev => { const next = new Set(prev); next.add(key); return next; });
+    setEpisodeProgress(prev => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
+  async function markEpisodeUnwatched(ep: Episode) {
+    const key = `episode_${ep.id}`;
+    await invoke("set_unwatched", { profile: profileName, keys: [key] }).catch(() => {});
+    setWatched(prev => { const next = new Set(prev); next.delete(key); return next; });
+    setEpisodeProgress(prev => { const next = { ...prev }; delete next[key]; return next; });
   }
 
   return (
@@ -77,7 +159,21 @@ export default function SeasonDetail({ episodes, profileName }: SeasonDetailProp
           onBack={() => setPendingEpisode(null)}
         />
       )}
+      {showPlaybackModal && (
+        <PlaybackLoadingModal onCancel={() => setShowPlaybackModal(false)} />
+      )}
 
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            ...(!watched.has(`episode_${contextMenu.ep.id}`) ? [{ label: "Mark as watched", onClick: () => markEpisodeWatched(contextMenu.ep) }] : []),
+            ...(watched.has(`episode_${contextMenu.ep.id}`) || !!episodeProgress[`episode_${contextMenu.ep.id}`] ? [{ label: "Mark as unwatched", onClick: () => markEpisodeUnwatched(contextMenu.ep) }] : []),
+          ]}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
       <div style={{ padding: "8px 32px 48px", background: "var(--color-bg)" }}>
         {seasonKeys.map((seasonKey) => {
           const eps = episodes[seasonKey];
@@ -97,6 +193,7 @@ export default function SeasonDetail({ episodes, profileName }: SeasonDetailProp
                     <div
                       key={ep.id}
                       onClick={() => handleEpisodePlay(ep)}
+                      onContextMenu={e => handleEpisodeContextMenu(e, ep)}
                       style={{ flexShrink: 0, width: "200px", cursor: "pointer" }}
                     >
                       <div style={{ position: "relative", paddingBottom: "56.25%", borderRadius: "6px", overflow: "hidden", background: "var(--color-card-bg)", border: "1px solid var(--color-border)", marginBottom: "8px" }}>

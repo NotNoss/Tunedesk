@@ -2,12 +2,14 @@ use std::io::Write;
 use std::sync::Mutex;
 use tauri::Manager;
 
+use crate::settings;
+
 const LOG_MAX_AGE_SECS: u64 = 7 * 24 * 3600;
 const LOG_MAX_SIZE_BYTES: u64 = 1024 * 1024; // 1 MB
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Info,
@@ -46,29 +48,6 @@ impl Default for AppLogState {
 
 fn log_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("tunedesk.log"))
-}
-
-fn level_path(app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join("log_level.txt"))
-}
-
-// ─── Persistence ──────────────────────────────────────────────────────────────
-
-pub fn load_log_level(app: &tauri::AppHandle) -> LogLevel {
-    let Some(path) = level_path(app) else { return LogLevel::Info; };
-    if !path.exists() { return LogLevel::Info; }
-    std::fs::read_to_string(path)
-        .map(|s| LogLevel::from_str(s.trim()))
-        .unwrap_or(LogLevel::Info)
-}
-
-fn save_log_level(app: &tauri::AppHandle, level: &LogLevel) {
-    if let Some(path) = level_path(app) {
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, level.as_str());
-    }
 }
 
 // ─── File rotation ────────────────────────────────────────────────────────────
@@ -166,6 +145,12 @@ pub fn log_debug(app: &tauri::AppHandle, module: &str, message: impl Into<String
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+pub fn log_event(app: tauri::AppHandle, level: String, module: String, message: String) {
+    let log_level = LogLevel::from_str(&level);
+    log(&app, log_level, &module, message);
+}
+
+#[tauri::command]
 pub fn get_log_level(app: tauri::AppHandle) -> String {
     app.state::<AppLogState>().level.lock().unwrap().as_str().to_string()
 }
@@ -174,6 +159,34 @@ pub fn get_log_level(app: tauri::AppHandle) -> String {
 pub fn set_log_level(app: tauri::AppHandle, level: String) -> Result<(), String> {
     let new_level = LogLevel::from_str(&level);
     *app.state::<AppLogState>().level.lock().unwrap() = new_level.clone();
-    save_log_level(&app, &new_level);
+    settings::update_log_level(&app, new_level.as_str());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_level_from_str_info() {
+        assert_eq!(LogLevel::from_str("info"), LogLevel::Info);
+    }
+
+    #[test]
+    fn log_level_from_str_debug() {
+        assert_eq!(LogLevel::from_str("debug"), LogLevel::Debug);
+    }
+
+    #[test]
+    fn log_level_from_str_unknown_defaults_to_info() {
+        assert_eq!(LogLevel::from_str("unknown"), LogLevel::Info);
+        assert_eq!(LogLevel::from_str(""), LogLevel::Info);
+        assert_eq!(LogLevel::from_str("INFO"), LogLevel::Info);
+    }
+
+    #[test]
+    fn log_level_as_str() {
+        assert_eq!(LogLevel::Info.as_str(), "info");
+        assert_eq!(LogLevel::Debug.as_str(), "debug");
+    }
 }

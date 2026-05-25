@@ -227,6 +227,22 @@ async fn run_mpv(app: &tauri::AppHandle, key: &str, url: String, start_pos: f64,
         }
     }
 
+    // On Wayland, new windows open on whichever monitor the cursor is on.
+    // Pass --screen-name / --fs-screen-name so mpv opens on the same monitor
+    // as the Tunedesk window instead.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Some(window) = app.get_webview_window("main") {
+            if let Ok(Some(monitor)) = window.current_monitor() {
+                if let Some(name) = monitor.name() {
+                    log_debug(app, "playback", format!("Targeting Wayland output: {name}"));
+                    args.push(format!("--screen-name={}", name));
+                    args.push(format!("--fs-screen-name={}", name));
+                }
+            }
+        }
+    }
+
     let mpv = mpv_executable();
     log_debug(app, "playback", format!("mpv binary: {}", mpv.display()));
 

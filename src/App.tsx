@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import AboutModal from "./components/AboutModal";
 import FetchToast from "./components/FetchToast";
 import ContentDetail from "./components/ContentDetail/ContentDetail";
@@ -207,7 +208,12 @@ function App() {
     await invoke("set_log_level", { level }).catch(() => {});
   }
 
-  function handleExit() {
+  async function handleExit() {
+    try {
+      const win = getCurrentWindow();
+      const [size, maximized] = await Promise.all([win.outerSize(), win.isMaximized()]);
+      await invoke("save_window_size", { width: size.width, height: size.height, maximized });
+    } catch {}
     invoke("exit_app");
   }
 

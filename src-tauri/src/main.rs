@@ -9,6 +9,7 @@ mod playback;
 mod profiles;
 mod search;
 mod series;
+mod settings;
 mod update;
 mod vods;
 
@@ -29,6 +30,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cache::AppCacheState::default())
         .manage(logs::AppLogState::default())
+        .manage(settings::AppSettingsState::default())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -39,6 +41,16 @@ fn main() {
 
             let cache_data = cache::load_cache_from_disk(&handle);
             *handle.state::<cache::AppCacheState>().0.lock().unwrap() = cache_data;
+
+            let user_settings = settings::load_settings(&handle);
+            if let Some(window) = handle.get_webview_window("main") {
+                if user_settings.window_maximized == Some(true) {
+                    let _ = window.maximize();
+                } else if let (Some(w), Some(h)) = (user_settings.window_width, user_settings.window_height) {
+                    let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: w, height: h }));
+                }
+            }
+            *handle.state::<settings::AppSettingsState>().0.lock().unwrap() = user_settings;
 
             logs::log_info(&handle, "app", "Application started");
 
@@ -81,6 +93,8 @@ fn main() {
             search::search_all_profiles,
             logs::get_log_level,
             logs::set_log_level,
+            settings::get_user_settings,
+            settings::save_window_size,
             update::restart_to_update,
         ])
         .run(tauri::generate_context!())

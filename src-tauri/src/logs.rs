@@ -166,6 +166,12 @@ pub fn log_debug(app: &tauri::AppHandle, module: &str, message: impl Into<String
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+pub fn log_event(app: tauri::AppHandle, level: String, module: String, message: String) {
+    let log_level = LogLevel::from_str(&level);
+    log(&app, log_level, &module, message);
+}
+
+#[tauri::command]
 pub fn get_log_level(app: tauri::AppHandle) -> String {
     app.state::<AppLogState>().level.lock().unwrap().as_str().to_string()
 }

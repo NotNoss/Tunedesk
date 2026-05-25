@@ -192,6 +192,16 @@ function App() {
     }
   }
 
+  const [autoPlayNext, setAutoPlayNext] = useState<boolean>(() => {
+    const stored = localStorage.getItem("autoPlayNext");
+    return stored === null ? true : stored === "true";
+  });
+
+  function handleAutoPlayNextChange(value: boolean) {
+    setAutoPlayNext(value);
+    localStorage.setItem("autoPlayNext", String(value));
+  }
+
   const [logLevel, setLogLevel] = useState<"info" | "debug">("info");
 
   useEffect(() => {
@@ -345,6 +355,7 @@ function App() {
                   }}
                   episodes={seriesInfo.episodes}
                   profileName={currentProfileName}
+                  autoPlayNext={autoPlayNext}
                   onBack={() => setSeriesInfo(null)}
                 />
               )}
@@ -376,7 +387,8 @@ function App() {
           logLevel={logLevel}
           onLogLevelChange={handleLogLevelChange}
           onThemeChange={setTheme}
-
+          autoPlayNext={autoPlayNext}
+          onAutoPlayNextChange={handleAutoPlayNextChange}
           onClose={() => setShowPreferences(false)}
         />
       )}

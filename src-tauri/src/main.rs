@@ -91,6 +91,7 @@ fn main() {
             cache::prime_cache,
             cache::clear_cache,
             search::search_all_profiles,
+            logs::log_event,
             logs::get_log_level,
             logs::set_log_level,
             settings::get_user_settings,

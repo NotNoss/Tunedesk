@@ -28,6 +28,7 @@ type ContentDetailProps = (
   info: ContentInfo;
   profileName: string;
   onBack: () => void;
+  autoPlayNext?: boolean;
 };
 
 export default function ContentDetail(props: ContentDetailProps) {
@@ -193,7 +194,7 @@ export default function ContentDetail(props: ContentDetailProps) {
       </div>
 
       {props.type === "series" && (
-        <SeasonDetail episodes={props.episodes} profileName={profileName} />
+        <SeasonDetail episodes={props.episodes} profileName={profileName} autoPlayNext={props.autoPlayNext ?? true} />
       )}
     </div>
   );

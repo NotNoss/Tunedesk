@@ -24,38 +24,92 @@ interface ProgressEntry {
 interface SeasonDetailProps {
   episodes: Record<string, Episode[]>;
   profileName: string;
+  autoPlayNext: boolean;
 }
 
-export default function SeasonDetail({ episodes, profileName }: SeasonDetailProps) {
+export default function SeasonDetail({ episodes, profileName, autoPlayNext }: SeasonDetailProps) {
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, ProgressEntry>>({});
   const [watched, setWatched] = useState<Set<string>>(new Set());
   const [pendingEpisode, setPendingEpisode] = useState<Episode | null>(null);
 
   const seasonKeys = Object.keys(episodes).sort((a, b) => parseInt(a) - parseInt(b));
 
-  function fetchProgress() {
+  async function fetchProgress() {
     const keys = Object.values(episodes).flat().map(ep => `episode_${ep.id}`);
     if (keys.length === 0) return;
-    invoke<Record<string, ProgressEntry>>("get_progress", { profile: profileName, keys })
-      .then(setEpisodeProgress)
-      .catch(() => {});
-    invoke<string[]>("get_watched", { profile: profileName, keys })
-      .then(w => setWatched(new Set(w)))
-      .catch(() => {});
+    const [progress, watchedList] = await Promise.all([
+      invoke<Record<string, ProgressEntry>>("get_progress", { profile: profileName, keys }).catch(() => ({} as Record<string, ProgressEntry>)),
+      invoke<string[]>("get_watched", { profile: profileName, keys }).catch(() => [] as string[]),
+    ]);
+    setEpisodeProgress(progress);
+    setWatched(new Set(watchedList));
   }
 
   useEffect(() => { fetchProgress(); }, [episodes]);
 
-  function invokeEpisodePlay(ep: Episode, startOver: boolean) {
+  function findNextEpisode(ep: Episode): Episode | null {
+    const currentSeasonKey = String(ep.season);
+    const currentSeasonEps = episodes[currentSeasonKey] ?? [];
+    const currentIdx = currentSeasonEps.findIndex(e => e.id === ep.id);
+
+    if (currentIdx >= 0 && currentIdx < currentSeasonEps.length - 1) {
+      return currentSeasonEps[currentIdx + 1];
+    }
+
+    const currentSeasonIdx = seasonKeys.indexOf(currentSeasonKey);
+    if (currentSeasonIdx >= 0 && currentSeasonIdx < seasonKeys.length - 1) {
+      const nextSeasonKey = seasonKeys[currentSeasonIdx + 1];
+      const nextSeasonEps = episodes[nextSeasonKey];
+      if (nextSeasonEps?.length > 0) {
+        return nextSeasonEps[0];
+      }
+    }
+
+    return null;
+  }
+
+  async function invokeEpisodePlay(ep: Episode, startOver: boolean) {
     setPendingEpisode(null);
-    invoke("play_episode", {
-      name: profileName,
-      episodeId: ep.id,
-      containerExtension: ep.container_extension ?? "",
-      startOver,
-    })
-      .then(() => fetchProgress())
-      .catch(console.error);
+
+    try {
+      await invoke("play_episode", {
+        name: profileName,
+        episodeId: ep.id,
+        containerExtension: ep.container_extension ?? "",
+        startOver,
+      });
+    } catch (e) {
+      invoke("log_event", { level: "info", module: "autoplay", message: `Episode playback error for S${ep.season}E${ep.episode_num}: ${e}` }).catch(() => {});
+      console.error(e);
+      fetchProgress();
+      return;
+    }
+
+    const keys = Object.values(episodes).flat().map(e => `episode_${e.id}`);
+    const [progress, watchedList] = await Promise.all([
+      invoke<Record<string, ProgressEntry>>("get_progress", { profile: profileName, keys }).catch(() => ({} as Record<string, ProgressEntry>)),
+      invoke<string[]>("get_watched", { profile: profileName, keys }).catch(() => [] as string[]),
+    ]);
+    setEpisodeProgress(progress);
+    const newWatched = new Set(watchedList);
+    setWatched(newWatched);
+
+    if (autoPlayNext) {
+      const epKey = `episode_${ep.id}`;
+      const prog = progress[epKey];
+      const isWatched = newWatched.has(epKey);
+      const pct = prog && prog.duration > 0 ? prog.position / prog.duration : 0;
+
+      if (isWatched || pct > 0.9) {
+        const next = findNextEpisode(ep);
+        if (next) {
+          invoke("log_event", { level: "info", module: "autoplay", message: `Auto-playing next episode: S${next.season}E${next.episode_num} "${next.title || `Episode ${next.episode_num}`}"` }).catch(() => {});
+          invokeEpisodePlay(next, false);
+        } else {
+          invoke("log_event", { level: "info", module: "autoplay", message: `Auto-play: no next episode after S${ep.season}E${ep.episode_num} — end of series` }).catch(() => {});
+        }
+      }
+    }
   }
 
   function handleEpisodePlay(ep: Episode) {

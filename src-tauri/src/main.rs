@@ -25,12 +25,29 @@ fn exit_app() {
     std::process::exit(0);
 }
 
+#[tauri::command]
+async fn cancel_playback(app: tauri::AppHandle) -> Result<(), String> {
+    let pid = {
+        let state = app.state::<playback::MpvPidState>();
+        let guard = state.0.lock().unwrap();
+        *guard
+    };
+    if let Some(pid) = pid {
+        #[cfg(not(target_os = "windows"))]
+        { std::process::Command::new("kill").arg(pid.to_string()).output().ok(); }
+        #[cfg(target_os = "windows")]
+        { std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output().ok(); }
+    }
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(cache::AppCacheState::default())
         .manage(logs::AppLogState::default())
         .manage(settings::AppSettingsState::default())
+        .manage(playback::MpvPidState(std::sync::Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -97,6 +114,7 @@ fn main() {
             settings::get_user_settings,
             settings::save_window_size,
             update::restart_to_update,
+            cancel_playback,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

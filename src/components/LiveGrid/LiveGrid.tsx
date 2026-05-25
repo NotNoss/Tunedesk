@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LiveStream, EpgListing } from "./liveUtils";
 import LiveTop from "./LiveTop";
 import LiveChannel from "./LiveChannel";
+import PlaybackLoadingModal from "../PlaybackLoadingModal";
 
 interface LiveGridProps {
   profileName: string;
@@ -16,6 +17,7 @@ export default function LiveGrid({ profileName, categoryId, onBack }: LiveGridPr
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [selected, setSelected] = useState<LiveStream | null>(null);
+  const [showPlaybackModal, setShowPlaybackModal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +62,10 @@ export default function LiveGrid({ profileName, categoryId, onBack }: LiveGridPr
   }
 
   function handlePlay(ch: LiveStream) {
-    invoke("play_live", { name: profileName, streamId: ch.stream_id }).catch(console.error);
+    setShowPlaybackModal(true);
+    invoke("play_live", { name: profileName, streamId: ch.stream_id })
+      .catch(console.error)
+      .finally(() => setShowPlaybackModal(false));
   }
 
   const selectedListing = selected ? getCurrentListing(selected.stream_id) : undefined;
@@ -75,6 +80,9 @@ export default function LiveGrid({ profileName, categoryId, onBack }: LiveGridPr
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {showPlaybackModal && (
+        <PlaybackLoadingModal onCancel={() => setShowPlaybackModal(false)} />
+      )}
 
       <LiveTop
         selected={selected}

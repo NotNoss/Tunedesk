@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ResumeModal from "../ResumeModal";
+import PlaybackLoadingModal from "../PlaybackLoadingModal";
 
 export interface Episode {
   id: string;
@@ -31,6 +32,7 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
   const [episodeProgress, setEpisodeProgress] = useState<Record<string, ProgressEntry>>({});
   const [watched, setWatched] = useState<Set<string>>(new Set());
   const [pendingEpisode, setPendingEpisode] = useState<Episode | null>(null);
+  const [showPlaybackModal, setShowPlaybackModal] = useState(false);
 
   const seasonKeys = Object.keys(episodes).sort((a, b) => parseInt(a) - parseInt(b));
 
@@ -70,6 +72,7 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
 
   async function invokeEpisodePlay(ep: Episode, startOver: boolean) {
     setPendingEpisode(null);
+    setShowPlaybackModal(true);
 
     try {
       await invoke("play_episode", {
@@ -82,8 +85,11 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
       invoke("log_event", { level: "info", module: "autoplay", message: `Episode playback error for S${ep.season}E${ep.episode_num}: ${e}` }).catch(() => {});
       console.error(e);
       fetchProgress();
+      setShowPlaybackModal(false);
       return;
     }
+
+    setShowPlaybackModal(false);
 
     const keys = Object.values(episodes).flat().map(e => `episode_${e.id}`);
     const [progress, watchedList] = await Promise.all([
@@ -130,6 +136,9 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
           onStartOver={() => invokeEpisodePlay(pendingEpisode, true)}
           onBack={() => setPendingEpisode(null)}
         />
+      )}
+      {showPlaybackModal && (
+        <PlaybackLoadingModal onCancel={() => setShowPlaybackModal(false)} />
       )}
 
       <div style={{ padding: "8px 32px 48px", background: "var(--color-bg)" }}>

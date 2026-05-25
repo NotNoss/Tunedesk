@@ -1,9 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Mutex;
 use tauri::Manager;
 
 use crate::cache::{progress_path, read_progress_map, write_progress_entry};
 use crate::logs::{log_debug, log_info};
 use crate::settings;
+
+pub struct MpvPidState(pub Mutex<Option<u32>>);
 
 // Locate the mpv binary. When Tauri bundles a sidecar it places the binary
 // next to the app executable, so we check there first and fall back to the
@@ -236,13 +239,24 @@ async fn run_mpv(app: &tauri::AppHandle, key: &str, url: String, start_pos: f64,
             msg
         })?;
 
-    tauri::async_runtime::spawn_blocking(move || child.wait())
+    {
+        let state = app.state::<MpvPidState>();
+        *state.0.lock().unwrap() = Some(child.id());
+    }
+
+    let wait_result = tauri::async_runtime::spawn_blocking(move || child.wait())
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| {
-            log_info(app, "playback", format!("mpv exited with error: {e}"));
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
+
+    {
+        let state = app.state::<MpvPidState>();
+        *state.0.lock().unwrap() = None;
+    }
+
+    wait_result.map_err(|e| {
+        log_info(app, "playback", format!("mpv exited with error: {e}"));
+        e.to_string()
+    })?;
 
     log_info(app, "playback", format!("mpv exited for '{key}'"));
     Ok(())

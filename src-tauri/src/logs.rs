@@ -9,7 +9,7 @@ const LOG_MAX_SIZE_BYTES: u64 = 1024 * 1024; // 1 MB
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     Info,
@@ -161,4 +161,32 @@ pub fn set_log_level(app: tauri::AppHandle, level: String) -> Result<(), String>
     *app.state::<AppLogState>().level.lock().unwrap() = new_level.clone();
     settings::update_log_level(&app, new_level.as_str());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_level_from_str_info() {
+        assert_eq!(LogLevel::from_str("info"), LogLevel::Info);
+    }
+
+    #[test]
+    fn log_level_from_str_debug() {
+        assert_eq!(LogLevel::from_str("debug"), LogLevel::Debug);
+    }
+
+    #[test]
+    fn log_level_from_str_unknown_defaults_to_info() {
+        assert_eq!(LogLevel::from_str("unknown"), LogLevel::Info);
+        assert_eq!(LogLevel::from_str(""), LogLevel::Info);
+        assert_eq!(LogLevel::from_str("INFO"), LogLevel::Info);
+    }
+
+    #[test]
+    fn log_level_as_str() {
+        assert_eq!(LogLevel::Info.as_str(), "info");
+        assert_eq!(LogLevel::Debug.as_str(), "debug");
+    }
 }

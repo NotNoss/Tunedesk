@@ -51,15 +51,17 @@ fn main() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            let level = logs::load_log_level(&handle);
-            *handle.state::<logs::AppLogState>().level.lock().unwrap() = level;
-
             logs::rotate_log_if_needed(&handle);
 
             let cache_data = cache::load_cache_from_disk(&handle);
             *handle.state::<cache::AppCacheState>().0.lock().unwrap() = cache_data;
 
             let user_settings = settings::load_settings(&handle);
+            let log_level = user_settings.log_level
+                .as_deref()
+                .map(logs::LogLevel::from_str)
+                .unwrap_or(logs::LogLevel::Info);
+            *handle.state::<logs::AppLogState>().level.lock().unwrap() = log_level;
             if let Some(window) = handle.get_webview_window("main") {
                 if user_settings.window_maximized == Some(true) {
                     let _ = window.maximize();
@@ -113,6 +115,8 @@ fn main() {
             logs::set_log_level,
             settings::get_user_settings,
             settings::save_window_size,
+            settings::save_theme,
+            settings::save_auto_play_next,
             update::restart_to_update,
             cancel_playback,
         ])

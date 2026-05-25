@@ -77,15 +77,17 @@ function App() {
   const [showNewProfile, setShowNewProfile] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    return (localStorage.getItem("theme") as "dark" | "light") ?? "dark";
-  });
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme === "light" ? "light" : "");
-    localStorage.setItem("theme", theme);
   }, [theme]);
+
+  async function handleThemeChange(newTheme: "dark" | "light") {
+    setTheme(newTheme);
+    await invoke("save_theme", { theme: newTheme }).catch(() => {});
+  }
   const [profiles, setProfiles] = useState<string[]>([]);
   const [m3u8Profiles, setM3u8Profiles] = useState<Set<string>>(new Set());
   const [profileIcons, setProfileIcons] = useState<Record<string, string>>({});
@@ -192,22 +194,21 @@ function App() {
     }
   }
 
-  const [autoPlayNext, setAutoPlayNext] = useState<boolean>(() => {
-    const stored = localStorage.getItem("autoPlayNext");
-    return stored === null ? true : stored === "true";
-  });
+  const [autoPlayNext, setAutoPlayNext] = useState<boolean>(true);
 
-  function handleAutoPlayNextChange(value: boolean) {
+  async function handleAutoPlayNextChange(value: boolean) {
     setAutoPlayNext(value);
-    localStorage.setItem("autoPlayNext", String(value));
+    await invoke("save_auto_play_next", { value }).catch(() => {});
   }
 
   const [logLevel, setLogLevel] = useState<"info" | "debug">("info");
 
   useEffect(() => {
     loadProfiles();
-    invoke<string>("get_log_level").then(level => {
-      setLogLevel(level as "info" | "debug");
+    invoke<{ theme?: string; auto_play_next?: boolean; log_level?: string }>("get_user_settings").then(s => {
+      if (s.theme === "light" || s.theme === "dark") setTheme(s.theme);
+      if (s.auto_play_next != null) setAutoPlayNext(s.auto_play_next);
+      if (s.log_level === "debug") setLogLevel("debug");
     }).catch(() => {});
     const unlisten = listen<string>("update-ready", (e) => setUpdateVersion(e.payload));
     return () => { unlisten.then(fn => fn()); };
@@ -386,7 +387,7 @@ function App() {
           theme={theme}
           logLevel={logLevel}
           onLogLevelChange={handleLogLevelChange}
-          onThemeChange={setTheme}
+          onThemeChange={handleThemeChange}
           autoPlayNext={autoPlayNext}
           onAutoPlayNextChange={handleAutoPlayNextChange}
           onClose={() => setShowPreferences(false)}

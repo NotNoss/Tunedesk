@@ -1,8 +1,6 @@
 use std::sync::Mutex;
 use tauri::Manager;
 
-use crate::logs::log_info;
-
 #[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
 pub struct UserSettings {
     pub volume: Option<f64>,
@@ -13,6 +11,9 @@ pub struct UserSettings {
     pub window_width: Option<u32>,
     pub window_height: Option<u32>,
     pub window_maximized: Option<bool>,
+    pub theme: Option<String>,
+    pub auto_play_next: Option<bool>,
+    pub log_level: Option<String>,
 }
 
 pub struct AppSettingsState(pub Mutex<UserSettings>);
@@ -68,10 +69,6 @@ pub fn update_from_mpv(
         }
     }
     save_to_disk(app, &settings);
-    log_info(app, "settings", format!(
-        "Saved playback settings — volume: {:?}, subtitle: {:?}, audio: {:?}",
-        settings.volume, settings.subtitle_lang, settings.audio_lang
-    ));
 }
 
 #[tauri::command]
@@ -92,4 +89,29 @@ pub fn save_window_size(app: tauri::AppHandle, width: u32, height: u32, maximize
     }
     save_to_disk(&app, &settings);
     Ok(())
+}
+
+#[tauri::command]
+pub fn save_theme(app: tauri::AppHandle, theme: String) -> Result<(), String> {
+    let state = app.state::<AppSettingsState>();
+    let mut settings = state.0.lock().unwrap();
+    settings.theme = Some(theme);
+    save_to_disk(&app, &settings);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_auto_play_next(app: tauri::AppHandle, value: bool) -> Result<(), String> {
+    let state = app.state::<AppSettingsState>();
+    let mut settings = state.0.lock().unwrap();
+    settings.auto_play_next = Some(value);
+    save_to_disk(&app, &settings);
+    Ok(())
+}
+
+pub fn update_log_level(app: &tauri::AppHandle, level_str: &str) {
+    let state = app.state::<AppSettingsState>();
+    let mut settings = state.0.lock().unwrap();
+    settings.log_level = Some(level_str.to_string());
+    save_to_disk(app, &settings);
 }

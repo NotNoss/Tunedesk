@@ -107,6 +107,8 @@ fn main() {
             series::play_episode,
             cache::get_progress,
             cache::get_watched,
+            cache::set_watched,
+            cache::set_unwatched,
             cache::prime_cache,
             cache::clear_cache,
             search::search_all_profiles,

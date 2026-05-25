@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import ContextMenu from "./ContextMenu";
 
 interface ContentItem {
   id: number;
@@ -14,16 +15,92 @@ interface ContentGridProps {
   keyPrefix?: string;
 }
 
+interface ContextMenuState {
+  x: number;
+  y: number;
+  item: ContentItem;
+}
+
+interface SeriesInfo {
+  episodes: Record<string, { id: string }[]>;
+}
+
 export default function ContentGrid({ items, onSelect, profileName, keyPrefix }: ContentGridProps) {
   const [watched, setWatched] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<Record<string, { position: number; duration: number }>>({});
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   useEffect(() => {
     if (!profileName || !keyPrefix || items.length === 0) return;
     const keys = items.map(i => `${keyPrefix}_${i.id}`);
-    invoke<string[]>("get_watched", { profile: profileName, keys })
-      .then(w => setWatched(new Set(w)))
-      .catch(() => {});
+    const progressFetch = keyPrefix === "movie"
+      ? invoke<Record<string, { position: number; duration: number }>>("get_progress", { profile: profileName, keys })
+      : Promise.resolve({} as Record<string, { position: number; duration: number }>);
+    Promise.all([
+      invoke<string[]>("get_watched", { profile: profileName, keys }),
+      progressFetch,
+    ]).then(([w, p]) => {
+      setWatched(new Set(w));
+      setProgress(p);
+    }).catch(() => {});
   }, [items, profileName, keyPrefix]);
+
+  function handleContextMenu(e: React.MouseEvent, item: ContentItem) {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, item });
+  }
+
+  async function collectKeys(item: ContentItem): Promise<string[]> {
+    const primaryKey = `${keyPrefix}_${item.id}`;
+    const keys = [primaryKey];
+    if (keyPrefix === "series" && profileName) {
+      try {
+        const info = await invoke<SeriesInfo>("get_series_info", { name: profileName, seriesId: item.id });
+        const episodeKeys = Object.values(info.episodes).flat().map(ep => `episode_${ep.id}`);
+        keys.push(...episodeKeys);
+      } catch {}
+    }
+    return keys;
+  }
+
+  async function markWatched(item: ContentItem) {
+    if (!profileName || !keyPrefix) return;
+    const keys = await collectKeys(item);
+    await invoke("set_watched", { profile: profileName, keys }).catch(() => {});
+    setWatched(prev => {
+      const next = new Set(prev);
+      next.add(`${keyPrefix}_${item.id}`);
+      return next;
+    });
+  }
+
+  async function markUnwatched(item: ContentItem) {
+    if (!profileName || !keyPrefix) return;
+    const keys = await collectKeys(item);
+    await invoke("set_unwatched", { profile: profileName, keys }).catch(() => {});
+    setWatched(prev => {
+      const next = new Set(prev);
+      next.delete(`${keyPrefix}_${item.id}`);
+      return next;
+    });
+  }
+
+  function buildMenuItems(item: ContentItem) {
+    const key = keyPrefix ? `${keyPrefix}_${item.id}` : "";
+    const isWatched = watched.has(key);
+    const hasProgress = !!progress[key];
+    const isSeries = keyPrefix === "series";
+    const label = isSeries ? "series" : "this";
+    const menuItems: { label: string; onClick: () => void }[] = [];
+    if (!isWatched) {
+      menuItems.push({ label: `Mark ${label} as watched`, onClick: () => markWatched(item) });
+    }
+    if (isWatched || hasProgress) {
+      menuItems.push({ label: `Mark ${label} as unwatched`, onClick: () => markUnwatched(item) });
+    }
+    return menuItems;
+  }
 
   return (
     <div style={{
@@ -43,6 +120,7 @@ export default function ContentGrid({ items, onSelect, profileName, keyPrefix }:
             <div key={item.id} style={{ position: "relative", paddingBottom: "150%" }}>
               <div
                 onClick={() => onSelect(item.id)}
+                onContextMenu={e => handleContextMenu(e, item)}
                 style={{
                   position: "absolute",
                   inset: 0,
@@ -96,6 +174,14 @@ export default function ContentGrid({ items, onSelect, profileName, keyPrefix }:
           );
         })}
       </div>
+      {contextMenu && profileName && keyPrefix && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={buildMenuItems(contextMenu.item)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

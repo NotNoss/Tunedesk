@@ -372,6 +372,8 @@ function App() {
                 <ContentGrid
                   items={series.map(s => ({ id: s.series_id, name: s.name, image: s.cover }))}
                   onSelect={handleSeriesSelect}
+                  profileName={currentProfileName}
+                  keyPrefix="series"
                 />
               )}
               {!movieInfo && !seriesInfo && contentType === "live" && (

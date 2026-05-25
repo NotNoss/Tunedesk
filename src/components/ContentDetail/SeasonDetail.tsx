@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ResumeModal from "../ResumeModal";
 import PlaybackLoadingModal from "../PlaybackLoadingModal";
+import ContextMenu from "../ContextMenu";
 
 export interface Episode {
   id: string;
@@ -33,6 +34,7 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
   const [watched, setWatched] = useState<Set<string>>(new Set());
   const [pendingEpisode, setPendingEpisode] = useState<Episode | null>(null);
   const [showPlaybackModal, setShowPlaybackModal] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; ep: Episode } | null>(null);
 
   const seasonKeys = Object.keys(episodes).sort((a, b) => parseInt(a) - parseInt(b));
 
@@ -127,6 +129,26 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
     }
   }
 
+  function handleEpisodeContextMenu(e: React.MouseEvent, ep: Episode) {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, ep });
+  }
+
+  async function markEpisodeWatched(ep: Episode) {
+    const key = `episode_${ep.id}`;
+    await invoke("set_watched", { profile: profileName, keys: [key] }).catch(() => {});
+    setWatched(prev => { const next = new Set(prev); next.add(key); return next; });
+    setEpisodeProgress(prev => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
+  async function markEpisodeUnwatched(ep: Episode) {
+    const key = `episode_${ep.id}`;
+    await invoke("set_unwatched", { profile: profileName, keys: [key] }).catch(() => {});
+    setWatched(prev => { const next = new Set(prev); next.delete(key); return next; });
+    setEpisodeProgress(prev => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
   return (
     <>
       {pendingEpisode && (
@@ -141,6 +163,17 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
         <PlaybackLoadingModal onCancel={() => setShowPlaybackModal(false)} />
       )}
 
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            ...(!watched.has(`episode_${contextMenu.ep.id}`) ? [{ label: "Mark as watched", onClick: () => markEpisodeWatched(contextMenu.ep) }] : []),
+            ...(watched.has(`episode_${contextMenu.ep.id}`) || !!episodeProgress[`episode_${contextMenu.ep.id}`] ? [{ label: "Mark as unwatched", onClick: () => markEpisodeUnwatched(contextMenu.ep) }] : []),
+          ]}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
       <div style={{ padding: "8px 32px 48px", background: "var(--color-bg)" }}>
         {seasonKeys.map((seasonKey) => {
           const eps = episodes[seasonKey];
@@ -160,6 +193,7 @@ export default function SeasonDetail({ episodes, profileName, autoPlayNext }: Se
                     <div
                       key={ep.id}
                       onClick={() => handleEpisodePlay(ep)}
+                      onContextMenu={e => handleEpisodeContextMenu(e, ep)}
                       style={{ flexShrink: 0, width: "200px", cursor: "pointer" }}
                     >
                       <div style={{ position: "relative", paddingBottom: "56.25%", borderRadius: "6px", overflow: "hidden", background: "var(--color-card-bg)", border: "1px solid var(--color-border)", marginBottom: "8px" }}>

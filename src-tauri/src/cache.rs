@@ -350,6 +350,76 @@ pub fn get_watched(app: tauri::AppHandle, profile: String, keys: Vec<String>) ->
     keys.into_iter().filter(|k| set.contains(k)).collect()
 }
 
+#[tauri::command]
+pub fn set_watched(app: tauri::AppHandle, profile: String, keys: Vec<String>) -> Result<(), String> {
+    let mut progress_map = read_progress_map(&app, &profile);
+    let mut progress_changed = false;
+    for key in &keys {
+        if progress_map.remove(key).is_some() {
+            progress_changed = true;
+        }
+    }
+    if progress_changed {
+        if let Ok(path) = progress_path(&app, &profile) {
+            if let Err(e) = std::fs::write(path, serde_json::to_string_pretty(&progress_map).unwrap()) {
+                log_info(&app, "cache", format!("Failed to write progress for '{profile}': {e}"));
+            }
+        }
+    }
+
+    let mut set = read_watched_set(&app, &profile);
+    let mut watched_changed = false;
+    for key in &keys {
+        if set.insert(key.clone()) {
+            watched_changed = true;
+        }
+    }
+    if watched_changed {
+        if let Ok(path) = watched_path(&app, &profile) {
+            let list: Vec<&String> = set.iter().collect();
+            if let Err(e) = std::fs::write(path, serde_json::to_string(&list).unwrap()) {
+                log_info(&app, "cache", format!("Failed to write watched list for '{profile}': {e}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_unwatched(app: tauri::AppHandle, profile: String, keys: Vec<String>) -> Result<(), String> {
+    let mut progress_map = read_progress_map(&app, &profile);
+    let mut progress_changed = false;
+    for key in &keys {
+        if progress_map.remove(key).is_some() {
+            progress_changed = true;
+        }
+    }
+    if progress_changed {
+        if let Ok(path) = progress_path(&app, &profile) {
+            if let Err(e) = std::fs::write(path, serde_json::to_string_pretty(&progress_map).unwrap()) {
+                log_info(&app, "cache", format!("Failed to write progress for '{profile}': {e}"));
+            }
+        }
+    }
+
+    let mut set = read_watched_set(&app, &profile);
+    let mut watched_changed = false;
+    for key in &keys {
+        if set.remove(key) {
+            watched_changed = true;
+        }
+    }
+    if watched_changed {
+        if let Ok(path) = watched_path(&app, &profile) {
+            let list: Vec<&String> = set.iter().collect();
+            if let Err(e) = std::fs::write(path, serde_json::to_string(&list).unwrap()) {
+                log_info(&app, "cache", format!("Failed to write watched list for '{profile}': {e}"));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
